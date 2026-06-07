@@ -257,7 +257,7 @@ export const RecipeBookPage = () => {
             </div>
             <input
               className="mt-5 w-full rounded-lg border border-[#dcc1b9] bg-[#fff8f5] px-4 py-3 text-sm outline-none focus:border-[#9a4022]"
-              placeholder="예: 찌개, 다이어트, 아이반찬"
+              placeholder="예: 찌개, 볶음밥, 아이반찬"
               value={name}
               onChange={(event) => setName(event.target.value)}
               autoFocus

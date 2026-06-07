@@ -56,10 +56,13 @@ export const RecipeImportPage = () => {
     <section className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-stone-950">링크로 가져오기</h1>
-        <p className="mt-1 text-sm text-stone-500">블로그, 웹사이트, 유튜브, 틱톡, 릴스 링크를 붙여넣으면 AI가 레시피 초안을 만듭니다.</p>
+        <p className="mt-1 text-sm text-stone-500">권한이 있는 블로그나 웹사이트 레시피 URL을 정리해 개인 레시피 초안으로 저장합니다.</p>
       </div>
       <div className="space-y-3 rounded-xl border border-amber-100 bg-white p-4">
         <input className="w-full rounded-lg border border-amber-100 px-3 py-3 text-sm outline-none focus:border-amber-500" placeholder="레시피 링크 붙여넣기" value={url} onChange={(event) => setUrl(event.target.value)} />
+        <p className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-stone-600">
+          영상/SNS 자동 추출, 유료 콘텐츠 우회, 저작권을 침해하는 저장은 지원하지 않습니다.
+        </p>
         <Button className="w-full" disabled={loading || !url} onClick={importRecipe}>
           <Wand2 size={18} /> 레시피 뽑기
         </Button>

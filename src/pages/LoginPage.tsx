@@ -70,7 +70,7 @@ export const LoginPage = () => {
           </div>
           <h1 className="mt-4 text-2xl font-bold text-stone-950">인터넷 레시피를 내 입맛에 맞게</h1>
           <p className="mt-2 text-sm leading-6 text-stone-600">
-            My Recipe Note는 직접 쓴 레시피, 웹 URL, 유튜브 설명과 자막을 AI가 나만의 조리 노트로 정리해주는 모바일 레시피북입니다.
+            My Recipe Note는 직접 쓴 레시피와 권한이 있는 웹 레시피 URL을 개인 조리 노트로 정리해주는 모바일 레시피북입니다.
           </p>
         </div>
 

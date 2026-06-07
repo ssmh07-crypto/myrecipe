@@ -37,19 +37,20 @@ const getMetaContent = (html: string, property: string) => {
   return html.match(pattern)?.[1] || ''
 }
 
-const getOembedText = async (url: URL) => {
-  const target = url.toString()
-  const providers = url.hostname.includes('youtube.com') || url.hostname.includes('youtu.be')
-    ? [`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(target)}`]
-    : []
+const blockedHosts = [
+  'youtube.com',
+  'youtu.be',
+  'instagram.com',
+  'tiktok.com',
+  'snapchat.com',
+  'facebook.com',
+  'x.com',
+  'twitter.com',
+]
 
-  for (const provider of providers) {
-    const response = await fetch(provider).catch(() => null)
-    if (!response?.ok) continue
-    const data = (await response.json()) as { title?: string; author_name?: string }
-    return [data.title, data.author_name].filter(Boolean).join('\n')
-  }
-  return ''
+const isBlockedHost = (hostname: string) => {
+  const normalized = hostname.replace(/^www\./, '').toLowerCase()
+  return blockedHosts.some((host) => normalized === host || normalized.endsWith(`.${host}`))
 }
 
 const readLimitedText = async (response: Response) => {
@@ -151,6 +152,9 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     if (!body.url || body.url.length > 2000) return error('유효한 URL을 입력해 주세요.')
     const url = new URL(body.url)
     if (!['http:', 'https:'].includes(url.protocol)) return error('http 또는 https URL만 사용할 수 있습니다.')
+    if (isBlockedHost(url.hostname)) {
+      return error('영상/SNS 링크 자동 추출은 지원하지 않습니다. 권한이 있는 웹 레시피 페이지 URL만 사용할 수 있습니다.')
+    }
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10000)
@@ -161,10 +165,9 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
 
     if (!response.ok) return error('해당 링크를 가져올 수 없습니다.', 502)
     const html = await readLimitedText(response)
-    const oembedText = await getOembedText(url)
     const metaText = [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n')
     const pageText = sanitizeText(html)
-    const text = [oembedText, metaText, pageText].filter(Boolean).join('\n\n').slice(0, 12000)
+    const text = [metaText, pageText].filter(Boolean).join('\n\n').slice(0, 12000)
 
     if (text.length < 40) return error('레시피로 정리할 텍스트를 찾지 못했습니다.')
 

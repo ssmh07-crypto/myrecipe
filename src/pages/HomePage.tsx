@@ -77,10 +77,10 @@ export const HomePage = () => {
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-white">
               <Sparkles size={19} className="fill-white" />
-              <span className="text-xs font-bold uppercase tracking-wider">AI Import</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Recipe Import</span>
             </div>
             <h2 className="font-serif text-2xl font-semibold text-white">Import from anywhere</h2>
-            <p className="text-sm leading-6 text-white/90">링크 하나만 붙여넣으면 광고와 긴 글을 걷어내고 주방에서 바로 쓰기 좋은 레시피 초안을 만듭니다.</p>
+            <p className="text-sm leading-6 text-white/90">권한이 있는 웹 레시피 링크를 붙여넣으면 주방에서 바로 쓰기 좋은 개인 레시피 초안으로 정리합니다.</p>
           </div>
           <Link to={user ? '/recipes/import' : '/login'}>
             <Button variant="secondary" className="bg-white text-[#9a4022]">

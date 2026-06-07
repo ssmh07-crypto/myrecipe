@@ -3,12 +3,12 @@ import { useState } from 'react'
 import { Button } from '../components/ui/Button'
 
 const howItWorks = [
-  { icon: Copy, title: 'Copy link', description: '온라인에서 저장하고 싶은 레시피 링크를 복사합니다.' },
-  { icon: TableProperties, title: 'Paste', description: '링크를 붙여넣으면 서버가 본문을 정리합니다.' },
-  { icon: Wand2, title: 'Auto Magic', description: 'AI가 재료와 조리순서만 깔끔한 초안으로 만듭니다.' },
+  { icon: Copy, title: 'Copy link', description: '저장 권한이 있는 웹 레시피 링크를 복사합니다.' },
+  { icon: TableProperties, title: 'Paste', description: '공개 웹페이지의 본문을 개인 노트용 초안으로 정리합니다.' },
+  { icon: Wand2, title: 'Review draft', description: '저장 전 사용자가 직접 확인하고 수정합니다.' },
 ]
 
-const proFeatures = ['무제한 링크 추출', '광고 없는 레시피 초안', '조리 모드', '레시피북 고급 정리']
+const proFeatures = ['웹 레시피 링크 정리', '저장 전 초안 편집', '조리 모드', '레시피북 고급 정리']
 const freeFeatures = ['직접 레시피 저장', '레시피북 폴더', '사진 업로드']
 
 export const PremiumPage = () => {
@@ -29,9 +29,9 @@ export const PremiumPage = () => {
 
       <section className="text-center">
         <span className="inline-flex rounded-full bg-[#5b7d54] px-4 py-1 text-sm font-semibold text-white">PREMIUM FEATURE</span>
-        <h1 className="mt-4 font-serif text-[34px] font-bold leading-10 text-[#9a4022]">Save recipes in one click with link extraction</h1>
+        <h1 className="mt-4 font-serif text-[34px] font-bold leading-10 text-[#9a4022]">Organize your personal recipe archive</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg leading-7 text-[#56423c]">
-          블로그, 요리 사이트, 영상 링크를 깔끔한 레시피 카드로 바꿔 저장합니다. 복잡한 광고와 긴 설명은 줄이고 조리에 필요한 내용만 남깁니다.
+          직접 작성한 레시피와 권한이 있는 웹 레시피 페이지를 개인 레시피 카드로 정리합니다. 영상/SNS 자동 추출, 유료 콘텐츠 우회, 저작권 침해 저장은 지원하지 않습니다.
         </p>
       </section>
 
@@ -81,7 +81,7 @@ export const PremiumPage = () => {
               <Crown className="text-[#9a4022]" size={24} />
               <h2 className="font-serif text-2xl font-semibold">Recipe Pro</h2>
             </div>
-            <p className="mt-2 text-sm text-[#56423c]">링크 저장을 자주 쓰는 사용자를 위한 플랜.</p>
+            <p className="mt-2 text-sm text-[#56423c]">개인 레시피 아카이브를 더 편하게 관리하는 SaaS 플랜.</p>
             <div className="mt-6 flex items-baseline gap-1">
               <span className="text-4xl font-bold text-[#9a4022]">${price}</span>
               <span className="text-[#56423c]">{period}</span>
@@ -90,7 +90,7 @@ export const PremiumPage = () => {
               {proFeatures.map((feature) => (
                 <li key={feature} className="flex items-center gap-3 text-sm">
                   <CheckCircle className="text-[#9a4022]" size={20} />
-                  <span className={feature === '무제한 링크 추출' ? 'font-bold' : ''}>{feature}</span>
+                  <span className={feature === '웹 레시피 링크 정리' ? 'font-bold' : ''}>{feature}</span>
                 </li>
               ))}
             </ul>
@@ -115,7 +115,7 @@ export const PremiumPage = () => {
             <tbody className="divide-y divide-[#dcc1b9]">
               {[
                 ['Recipe Limit', 'Unlimited', 'Unlimited'],
-                ['Link Extraction', false, true],
+                ['Authorized Web Recipe Import', false, true],
                 ['Cooking Mode', true, true],
                 ['Recipe Books', true, true],
               ].map(([feature, free, pro]) => (
