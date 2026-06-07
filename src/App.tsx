@@ -10,6 +10,7 @@ import { RecipeNewPage } from './pages/RecipeNewPage'
 import { RecipeBookPage } from './pages/RecipeBookPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { HomePage } from './pages/HomePage'
+import { PremiumPage } from './pages/PremiumPage'
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
       <Route path="/recipes/:id" element={<AppLayout hideHeader hideNav><RecipeDetailPage /></AppLayout>} />
       <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />
       <Route path="/recipe-books" element={<AppLayout><RecipeBookPage /></AppLayout>} />
+      <Route path="/premium" element={<AppLayout><PremiumPage /></AppLayout>} />
       <Route path="/favorites" element={<AppLayout><FavoritesPage /></AppLayout>} />
       <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
     </Routes>
