@@ -137,9 +137,6 @@ export const RecipeDetailPage = () => {
             <button type="button" aria-label="공유" className="grid h-10 w-10 place-items-center rounded-full text-[#9a4022]" onClick={() => void shareRecipe()}>
               <Share2 size={21} />
             </button>
-            <button type="button" aria-label="PDF로 내보내기" className="grid h-10 w-10 place-items-center rounded-full text-[#9a4022]" onClick={exportPdf}>
-              <Download size={21} />
-            </button>
           </div>
         </div>
       </header>
@@ -151,8 +148,19 @@ export const RecipeDetailPage = () => {
         </section>
 
         <section className="relative z-10 -mt-8 px-5">
-          <div className="rounded-xl bg-white p-6 shadow-[0_4px_12px_rgba(154,64,34,0.08)]">
-            <div className="mb-3 flex flex-wrap gap-2">
+          <div className="relative rounded-xl bg-white p-6 shadow-[0_4px_12px_rgba(154,64,34,0.08)]">
+            <div className="no-print absolute right-4 top-4 flex gap-1">
+              <Link to={`/recipes/${recipe.id}/edit`} className="grid h-9 w-9 place-items-center rounded-full bg-[#f5ece7] text-[#9a4022]" aria-label="수정">
+                <Edit size={17} />
+              </Link>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-[#f5ece7] text-[#9a4022]" aria-label="레시피북에 담기" onClick={() => setFolderOpen(true)}>
+                <BookMarked size={17} />
+              </button>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-[#f5ece7] text-[#9a4022]" aria-label="PDF로 내보내기" onClick={exportPdf}>
+                <Download size={17} />
+              </button>
+            </div>
+            <div className="mb-3 flex flex-wrap gap-2 pr-32">
               <SourceBadge sourceType={recipe.source_type} />
               {recipe.source_type === 'imported' && recipe.source_url ? (
                 <a href={recipe.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full bg-[#f5ece7] px-3 py-1 text-xs font-semibold text-[#9a4022]">
@@ -168,10 +176,7 @@ export const RecipeDetailPage = () => {
             {recipe.memo ? (
               <p className="mt-5 border-l-4 border-[#9a4022] pl-4 text-base italic leading-7 text-[#56423c]">{recipe.memo}</p>
             ) : null}
-            <div className="no-print mt-5 flex gap-2">
-              <Link className="flex-1" to={`/recipes/${recipe.id}/edit`}><Button className="w-full" variant="secondary"><Edit size={17} />수정</Button></Link>
-              <Button variant="secondary" onClick={() => setFolderOpen(true)}><BookMarked size={17} />담기</Button>
-              <Button variant="secondary" onClick={exportPdf}><Download size={17} />PDF</Button>
+            <div className="no-print mt-5 flex justify-end">
               <Button variant="danger" onClick={() => setConfirmOpen(true)}><Trash2 size={17} /></Button>
             </div>
           </div>

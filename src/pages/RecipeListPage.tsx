@@ -1,6 +1,6 @@
 import { Link2, Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { RecipeCard } from '../components/recipe/RecipeCard'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
@@ -14,15 +14,12 @@ export const RecipeListPage = ({
   title = '나의 레시피',
   subtitle = '빠르게 저장하는 개인 레시피 노트',
   showImportAction = true,
-  autoFocusSearch = false,
 }: {
   title?: string
   subtitle?: string
   showImportAction?: boolean
-  autoFocusSearch?: boolean
 }) => {
   const { user } = useAuth()
-  const [searchParams] = useSearchParams()
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'imported'>('all')
@@ -48,12 +45,6 @@ export const RecipeListPage = ({
     load()
   }, [user])
 
-  useEffect(() => {
-    if (autoFocusSearch || searchParams.get('focus') === 'search') {
-      window.setTimeout(() => document.getElementById('recipe-search')?.focus(), 100)
-    }
-  }, [autoFocusSearch, searchParams])
-
   const filtered = recipes.filter((recipe) => {
     const matchesQuery = [recipe.title, recipe.memo, recipe.steps_text].join(' ').toLowerCase().includes(query.toLowerCase())
     const matchesSource = sourceFilter === 'all' || recipe.source_type === sourceFilter
@@ -68,6 +59,27 @@ export const RecipeListPage = ({
     setRecipes((data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
     setLoading(false)
   }
+
+  const emptyDescription = !user
+    ? '비회원은 둘러보기만 가능합니다. 저장된 레시피를 보려면 로그인해 주세요.'
+    : sourceFilter === 'imported'
+      ? '아직 링크로 가져온 레시피가 없습니다.'
+      : sourceFilter === 'manual'
+        ? '아직 직접 작성한 레시피가 없습니다.'
+        : '직접 작성하거나 샘플 레시피 3개를 저장해 시작할 수 있습니다.'
+
+  const emptyAction = !user ? (
+    <Link to="/login"><Button>로그인하기</Button></Link>
+  ) : sourceFilter === 'imported' ? (
+    <Link to="/recipes/import"><Button><Link2 size={17} />링크로 가져오기</Button></Link>
+  ) : sourceFilter === 'manual' ? (
+    <Link to="/recipes/new"><Button>새 레시피</Button></Link>
+  ) : (
+    <div className="flex justify-center gap-2">
+      <Link to="/recipes/new"><Button>새 레시피</Button></Link>
+      <Button type="button" variant="secondary" onClick={seedSamples}>샘플 저장</Button>
+    </div>
+  )
 
   return (
     <section className="space-y-4">
@@ -107,8 +119,8 @@ export const RecipeListPage = ({
       {!loading && filtered.length === 0 ? (
         <EmptyState
           title="저장된 레시피가 없습니다."
-          description={user ? '직접 작성하거나 샘플 레시피 3개를 저장해 시작할 수 있습니다.' : '비회원은 둘러보기만 가능합니다. 저장된 레시피를 보려면 로그인해 주세요.'}
-          action={<div className="flex justify-center gap-2"><Link to={user ? '/recipes/new' : '/login'}><Button>{user ? '새 레시피' : '로그인하기'}</Button></Link>{user ? <Button type="button" variant="secondary" onClick={seedSamples}>샘플 저장</Button> : null}</div>}
+          description={emptyDescription}
+          action={emptyAction}
         />
       ) : null}
       <div className="space-y-3">{filtered.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} />)}</div>

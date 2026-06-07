@@ -8,6 +8,7 @@ import { Button } from '../ui/Button'
 const inputClass = 'w-full rounded-lg border border-amber-100 bg-white px-3 py-3 text-sm outline-none focus:border-amber-500'
 const labelClass = 'text-sm font-semibold text-stone-800'
 const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+const servingOptions = Array.from({ length: 12 }, (_value, index) => index + 1)
 
 const ItemRows = ({ items, onChange }: { items: IngredientItem[]; onChange: (items: IngredientItem[]) => void }) => {
   const rows = items.length ? items : [{ name: '', amount: '', unit: '' }]
@@ -220,7 +221,12 @@ export const RecipeForm = ({
         </div>
         <div className="space-y-2">
           <label className={labelClass}>인분</label>
-          <input className={inputClass} type="number" min={0} value={form.servings ?? ''} onChange={(event) => setField('servings', Number(event.target.value) || null)} />
+          <select className={inputClass} value={form.servings ?? ''} onChange={(event) => setField('servings', Number(event.target.value) || null)}>
+            <option value="">선택 안 함</option>
+            {servingOptions.map((serving) => (
+              <option key={serving} value={serving}>{serving}인분</option>
+            ))}
+          </select>
         </div>
         <div className="space-y-2">
           <label className={labelClass}>난이도</label>

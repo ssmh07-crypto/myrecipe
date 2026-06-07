@@ -1,6 +1,6 @@
 import { BookMarked, BookOpen, Home, Plus, Search, Settings, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { NavLink, Navigate } from 'react-router-dom'
+import { NavLink, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { LoadingState } from '../ui/State'
 
@@ -24,6 +24,7 @@ export const AppLayout = ({
   hideNav?: boolean
 }) => {
   const { user, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) return <main className="min-h-screen bg-[#fff8ec] p-4"><LoadingState /></main>
   if (requireAuth && !user) return <Navigate to="/login" replace />
@@ -55,9 +56,12 @@ export const AppLayout = ({
               <NavLink
                 key={label}
                 to={to}
-                className={({ isActive }) =>
+                className={() => {
+                  const isActive = location.pathname === to
+                  return (
                   `flex flex-col items-center gap-1 rounded-full px-2 py-2 text-xs transition ${isActive ? 'bg-[#ffdbd0] text-[#390b00]' : 'text-[#56423c]'}`
-                }
+                  )
+                }}
               >
                 <Icon size={20} />
                 <span>{label}</span>
