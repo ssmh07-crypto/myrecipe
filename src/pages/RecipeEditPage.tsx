@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { RecipeForm } from '../components/recipe/RecipeForm'
 import { ErrorState, LoadingState } from '../components/ui/State'
+import { normalizeRecipe } from '../lib/recipes'
+import { uploadRecipeImage } from '../lib/storage'
 import { supabase } from '../lib/supabaseClient'
-import type { Recipe, RecipeInput } from '../types/recipe'
+import { useAuth } from '../hooks/useAuth'
+import type { Recipe, RecipeFormResult } from '../types/recipe'
 
 export const RecipeEditPage = () => {
   const { id } = useParams()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [recipe, setRecipe] = useState<Recipe | null>(null)
   const [loading, setLoading] = useState(true)
@@ -19,18 +23,23 @@ export const RecipeEditPage = () => {
       const { data, error: nextError } = await supabase.from('recipes').select('*').eq('id', id).single()
       setLoading(false)
       if (nextError) setError(nextError.message)
-      else setRecipe(data as Recipe)
+      else setRecipe(normalizeRecipe(data as Recipe))
     }
     load()
   }, [id])
 
-  const updateRecipe = async (value: RecipeInput) => {
-    if (!id) return
+  const updateRecipe = async ({ recipe: value, imageFile, removeImage }: RecipeFormResult) => {
+    if (!id || !user) return
     setSaving(true)
-    const { error: nextError } = await supabase.from('recipes').update(value).eq('id', id)
-    setSaving(false)
-    if (nextError) throw new Error(nextError.message)
-    navigate(`/recipes/${id}`)
+    try {
+      let imageUrl = removeImage ? '' : value.image_url
+      if (imageFile) imageUrl = await uploadRecipeImage(user.id, id, imageFile)
+      const { error: nextError } = await supabase.from('recipes').update({ ...value, image_url: imageUrl }).eq('id', id)
+      if (nextError) throw new Error(nextError.message)
+      navigate(`/recipes/${id}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <LoadingState />

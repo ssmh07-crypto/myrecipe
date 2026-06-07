@@ -1,3 +1,3 @@
-import { RecipeListPage } from './RecipeListPage'
+import { Navigate } from 'react-router-dom'
 
-export const FavoritesPage = () => <RecipeListPage favoritesOnly />
+export const FavoritesPage = () => <Navigate to="/recipe-books" replace />

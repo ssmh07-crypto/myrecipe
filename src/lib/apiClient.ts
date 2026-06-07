@@ -21,9 +21,3 @@ const postJson = async <T>(path: string, body: unknown, accessToken?: string): P
 
 export const importRecipeFromUrl = (url: string) =>
   postJson<Partial<RecipeInput> & { source_url: string }>('/api/import-recipe', { url })
-
-export const importRecipeFromYoutube = (youtubeUrl: string, transcriptText?: string) =>
-  postJson<
-    | (Partial<RecipeInput> & { source_url: string; youtube_video_id?: string })
-    | { needs_manual_text: true; message: string; youtube_video_id: string; source_url: string }
-  >('/api/import-youtube', { youtubeUrl, transcriptText })

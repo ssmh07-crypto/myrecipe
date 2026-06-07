@@ -1,21 +1,21 @@
 import { Link2, Plus } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { RecipeCard } from '../components/recipe/RecipeCard'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { dummyRecipes } from '../lib/dummyRecipes'
+import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe } from '../types/recipe'
 import { useAuth } from '../hooks/useAuth'
 
-export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: boolean }) => {
+export const RecipeListPage = () => {
   const { user } = useAuth()
   const [searchParams] = useSearchParams()
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [query, setQuery] = useState('')
-  const [tag, setTag] = useState('')
-  const [onlyFavorite, setOnlyFavorite] = useState(favoritesOnly)
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'imported'>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -28,7 +28,7 @@ export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: bool
       if (nextError) {
         setError(nextError.message)
       } else {
-        setRecipes((data || []) as Recipe[])
+        setRecipes((data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
       }
     }
     load()
@@ -40,12 +40,10 @@ export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: bool
     }
   }, [searchParams])
 
-  const tags = useMemo(() => Array.from(new Set(recipes.flatMap((recipe) => recipe.tags))).sort(), [recipes])
   const filtered = recipes.filter((recipe) => {
-    const matchesQuery = [recipe.title, recipe.description, recipe.personal_note].join(' ').toLowerCase().includes(query.toLowerCase())
-    const matchesTag = !tag || recipe.tags.includes(tag)
-    const matchesFavorite = !onlyFavorite || recipe.is_favorite
-    return matchesQuery && matchesTag && matchesFavorite
+    const matchesQuery = [recipe.title, recipe.memo, recipe.steps_text].join(' ').toLowerCase().includes(query.toLowerCase())
+    const matchesSource = sourceFilter === 'all' || recipe.source_type === sourceFilter
+    return matchesQuery && matchesSource
   })
 
   const seedSamples = async () => {
@@ -53,7 +51,7 @@ export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: bool
     setLoading(true)
     await supabase.from('recipes').insert(dummyRecipes.map((recipe) => ({ ...recipe, user_id: user.id })))
     const { data } = await supabase.from('recipes').select('*').order('created_at', { ascending: false })
-    setRecipes((data || []) as Recipe[])
+    setRecipes((data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
     setLoading(false)
   }
 
@@ -61,38 +59,33 @@ export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: bool
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-stone-950">{favoritesOnly ? '즐겨찾기' : '나의 레시피'}</h1>
-          <p className="mt-1 text-sm text-stone-500">내 입맛에 맞춘 개인 레시피북</p>
+          <h1 className="text-2xl font-bold text-stone-950">나의 레시피</h1>
+          <p className="mt-1 text-sm text-stone-500">빠르게 저장하는 개인 레시피 노트</p>
         </div>
         <Link to="/recipes/new">
           <Button><Plus size={18} />작성</Button>
         </Link>
       </div>
 
-      {!favoritesOnly ? (
-        <div>
-          <Link to="/recipes/import">
-            <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
-          </Link>
-        </div>
-      ) : null}
+      <div>
+        <Link to="/recipes/import">
+          <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
+        </Link>
+      </div>
 
       <div className="space-y-2 rounded-xl border border-amber-100 bg-white p-3">
         <input id="recipe-search" className="w-full rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-3 text-sm outline-none focus:border-amber-500" placeholder="레시피 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          <button type="button" className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${!tag ? 'bg-amber-700 text-white' : 'bg-amber-50 text-stone-600'}`} onClick={() => setTag('')}>전체</button>
-          {tags.map((nextTag) => (
-            <button key={nextTag} type="button" className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${tag === nextTag ? 'bg-amber-700 text-white' : 'bg-amber-50 text-stone-600'}`} onClick={() => setTag(nextTag)}>
-              {nextTag}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            ['all', '전체'],
+            ['manual', '내가 만든'],
+            ['imported', '가져온'],
+          ].map(([value, label]) => (
+            <button key={value} type="button" className={`rounded-lg px-3 py-2 text-xs font-semibold ${sourceFilter === value ? 'bg-amber-700 text-white' : 'bg-amber-50 text-stone-600'}`} onClick={() => setSourceFilter(value as typeof sourceFilter)}>
+              {label}
             </button>
           ))}
         </div>
-        {!favoritesOnly ? (
-          <label className="flex items-center gap-2 text-sm text-stone-600">
-            <input type="checkbox" checked={onlyFavorite} onChange={(event) => setOnlyFavorite(event.target.checked)} />
-            즐겨찾기만 보기
-          </label>
-        ) : null}
       </div>
 
       {error ? <ErrorState message={error} /> : null}

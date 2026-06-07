@@ -16,7 +16,7 @@ const json = (body: unknown, status = 200) =>
 
 const error = (message: string, status = 400) => json({ error: { message } }, status)
 
-const extractText = (html: string) =>
+const sanitizeText = (html: string) =>
   html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -24,9 +24,31 @@ const extractText = (html: string) =>
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 12000)
+
+const getMetaContent = (html: string, property: string) => {
+  const pattern = new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i')
+  return html.match(pattern)?.[1] || ''
+}
+
+const getOembedText = async (url: URL) => {
+  const target = url.toString()
+  const providers = url.hostname.includes('youtube.com') || url.hostname.includes('youtu.be')
+    ? [`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(target)}`]
+    : []
+
+  for (const provider of providers) {
+    const response = await fetch(provider).catch(() => null)
+    if (!response?.ok) continue
+    const data = (await response.json()) as { title?: string; author_name?: string }
+    return [data.title, data.author_name].filter(Boolean).join('\n')
+  }
+  return ''
+}
 
 const recipeSchema = {
   name: 'recipe_import',
@@ -36,16 +58,37 @@ const recipeSchema = {
     additionalProperties: false,
     properties: {
       title: { type: 'string' },
-      description: { type: 'string' },
-      ingredients: { type: 'array', items: { type: 'string' } },
-      seasonings: { type: 'array', items: { type: 'string' } },
-      steps: { type: 'array', items: { type: 'string' } },
-      cooking_time: { type: 'string' },
       servings: { type: 'number' },
-      tips: { type: 'array', items: { type: 'string' } },
-      tags: { type: 'array', items: { type: 'string' } },
+      ingredients: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            amount: { type: 'string' },
+            unit: { type: 'string' },
+          },
+          required: ['name', 'amount', 'unit'],
+        },
+      },
+      seasonings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            amount: { type: 'string' },
+            unit: { type: 'string' },
+          },
+          required: ['name', 'amount', 'unit'],
+        },
+      },
+      steps_text: { type: 'string' },
+      memo: { type: 'string' },
     },
-    required: ['title', 'description', 'ingredients', 'seasonings', 'steps', 'cooking_time', 'servings', 'tips', 'tags'],
+    required: ['title', 'servings', 'ingredients', 'seasonings', 'steps_text', 'memo'],
   },
 }
 
@@ -59,9 +102,9 @@ const structureRecipe = async (apiKey: string, text: string) => {
         {
           role: 'system',
           content:
-            'You structure recipe content into a personal recipe note in Korean. Do not copy the source verbatim. If information is unknown, use empty strings, empty arrays, or 0.',
+            'You create a concise Korean recipe draft from URL text. Do not copy the source verbatim. Return only fields in schema. If information is unknown, use empty strings, empty arrays, or 0.',
         },
-        { role: 'user', content: `다음 웹문서 내용을 개인 레시피로 요약/구조화해줘:\n\n${text}` },
+        { role: 'user', content: `다음 URL 텍스트를 모바일 레시피 노트 초안으로 구조화해줘:\n\n${text}` },
       ],
       text: { format: { type: 'json_schema', ...recipeSchema } },
     }),
@@ -85,21 +128,25 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10000)
-    const page = await fetch(url.toString(), {
+    const response = await fetch(url.toString(), {
       signal: controller.signal,
       headers: { 'User-Agent': 'MyRecipeNoteBot/1.0' },
     })
     clearTimeout(timeout)
 
-    if (!page.ok) return error('해당 페이지를 가져올 수 없습니다.', 502)
-    const html = await page.text()
-    const text = extractText(html)
-    if (text.length < 100) return error('레시피로 정리할 본문을 찾지 못했습니다.')
+    if (!response.ok) return error('해당 링크를 가져올 수 없습니다.', 502)
+    const html = await response.text()
+    const oembedText = await getOembedText(url)
+    const metaText = [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n')
+    const pageText = sanitizeText(html)
+    const text = [oembedText, metaText, pageText].filter(Boolean).join('\n\n').slice(0, 12000)
+
+    if (text.length < 40) return error('레시피로 정리할 텍스트를 찾지 못했습니다.')
 
     const recipe = await structureRecipe(env.OPENAI_API_KEY, text)
-    return json({ ...recipe, source_url: url.toString() })
+    return json({ ...recipe, source_url: url.toString(), source_type: 'imported' })
   } catch (nextError) {
-    const message = nextError instanceof Error && nextError.name === 'AbortError' ? '외부 페이지 응답 시간이 초과되었습니다.' : '레시피 가져오기에 실패했습니다.'
+    const message = nextError instanceof Error && nextError.name === 'AbortError' ? '외부 링크 응답 시간이 초과되었습니다.' : '레시피 가져오기에 실패했습니다.'
     return error(message, 500)
   }
 }

@@ -7,6 +7,7 @@ import { RecipeEditPage } from './pages/RecipeEditPage'
 import { RecipeImportPage } from './pages/RecipeImportPage'
 import { RecipeListPage } from './pages/RecipeListPage'
 import { RecipeNewPage } from './pages/RecipeNewPage'
+import { RecipeBookPage } from './pages/RecipeBookPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
       <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
       <Route path="/recipes/:id" element={<AppLayout><RecipeDetailPage /></AppLayout>} />
       <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />
+      <Route path="/recipe-books" element={<AppLayout><RecipeBookPage /></AppLayout>} />
       <Route path="/favorites" element={<AppLayout><FavoritesPage /></AppLayout>} />
       <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
     </Routes>

@@ -1,4 +1,4 @@
-import { BookOpen, Heart, Home, Plus, Search, Settings } from 'lucide-react'
+import { BookMarked, BookOpen, Home, Plus, Search, Settings } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -8,7 +8,7 @@ const tabs = [
   { to: '/recipes', label: '홈', icon: Home },
   { to: '/recipes?focus=search', label: '검색', icon: Search },
   { to: '/recipes/new', label: '추가', icon: Plus },
-  { to: '/favorites', label: '즐겨찾기', icon: Heart },
+  { to: '/recipe-books', label: '레시피북', icon: BookMarked },
   { to: '/settings', label: '설정', icon: Settings },
 ]
 

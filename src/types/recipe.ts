@@ -1,25 +1,21 @@
 export type RecipeSourceType = 'manual' | 'imported'
 
-export type RecipeDifficulty = '쉬움' | '보통' | '어려움'
+export interface IngredientItem {
+  name: string
+  amount: string
+  unit: string
+}
 
 export interface RecipeInput {
   title: string
-  description: string
   image_url: string
   servings: number | null
-  cooking_time: string
-  difficulty: RecipeDifficulty
-  ingredients: string[]
-  seasonings: string[]
-  steps: string[]
-  tips: string[]
-  tags: string[]
-  personal_note: string
-  next_time_note: string
+  ingredients: IngredientItem[]
+  seasonings: IngredientItem[]
+  steps_text: string
+  memo: string
   source_url: string
   source_type: RecipeSourceType
-  youtube_video_id: string
-  is_favorite: boolean
 }
 
 export interface Recipe extends RecipeInput {
@@ -29,22 +25,36 @@ export interface Recipe extends RecipeInput {
   updated_at: string
 }
 
+export interface RecipeFolder {
+  id: string
+  user_id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RecipeFolderItem {
+  id: string
+  user_id: string
+  folder_id: string
+  recipe_id: string
+  created_at: string
+}
+
+export interface RecipeFormResult {
+  recipe: RecipeInput
+  imageFile: File | null
+  removeImage: boolean
+}
+
 export const emptyRecipeInput = (): RecipeInput => ({
   title: '',
-  description: '',
   image_url: '',
   servings: 1,
-  cooking_time: '',
-  difficulty: '보통',
-  ingredients: [''],
-  seasonings: [''],
-  steps: [''],
-  tips: [],
-  tags: [],
-  personal_note: '',
-  next_time_note: '',
+  ingredients: [],
+  seasonings: [],
+  steps_text: '',
+  memo: '',
   source_url: '',
   source_type: 'manual',
-  youtube_video_id: '',
-  is_favorite: false,
 })
