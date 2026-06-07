@@ -8,7 +8,6 @@ import { RecipeImportPage } from './pages/RecipeImportPage'
 import { RecipeListPage } from './pages/RecipeListPage'
 import { RecipeNewPage } from './pages/RecipeNewPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { YoutubeImportPage } from './pages/YoutubeImportPage'
 
 function App() {
   return (
@@ -18,7 +17,7 @@ function App() {
       <Route path="/recipes" element={<AppLayout><RecipeListPage /></AppLayout>} />
       <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
       <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
-      <Route path="/recipes/import/youtube" element={<AppLayout><YoutubeImportPage /></AppLayout>} />
+      <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
       <Route path="/recipes/:id" element={<AppLayout><RecipeDetailPage /></AppLayout>} />
       <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />
       <Route path="/favorites" element={<AppLayout><FavoritesPage /></AppLayout>} />

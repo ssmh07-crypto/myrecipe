@@ -1,4 +1,4 @@
-import { Link2, PlaySquare, Plus } from 'lucide-react'
+import { Link2, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { RecipeCard } from '../components/recipe/RecipeCard'
@@ -70,12 +70,9 @@ export const RecipeListPage = ({ favoritesOnly = false }: { favoritesOnly?: bool
       </div>
 
       {!favoritesOnly ? (
-        <div className="grid grid-cols-2 gap-2">
+        <div>
           <Link to="/recipes/import">
-            <Button variant="secondary" className="w-full"><Link2 size={17} />URL 가져오기</Button>
-          </Link>
-          <Link to="/recipes/import/youtube">
-            <Button variant="secondary" className="w-full"><PlaySquare size={17} />유튜브</Button>
+            <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
           </Link>
         </div>
       ) : null}
