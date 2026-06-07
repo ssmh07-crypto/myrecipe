@@ -9,13 +9,16 @@ import { RecipeListPage } from './pages/RecipeListPage'
 import { RecipeNewPage } from './pages/RecipeNewPage'
 import { RecipeBookPage } from './pages/RecipeBookPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { HomePage } from './pages/HomePage'
 
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Navigate to="/recipes" replace />} />
-      <Route path="/recipes" element={<AppLayout><RecipeListPage /></AppLayout>} />
+      <Route path="/recipes" element={<AppLayout><HomePage /></AppLayout>} />
+      <Route path="/recipes/recent" element={<AppLayout><RecipeListPage title="최근 레시피" subtitle="최근에 등록한 레시피를 최신순으로 모았습니다." showImportAction={false} /></AppLayout>} />
+      <Route path="/recipes/search" element={<AppLayout><RecipeListPage title="레시피 검색" subtitle="저장한 레시피를 이름과 메모로 찾아보세요." showImportAction={false} autoFocusSearch /></AppLayout>} />
       <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
       <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
       <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />

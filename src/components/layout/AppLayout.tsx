@@ -6,7 +6,7 @@ import { LoadingState } from '../ui/State'
 
 const tabs = [
   { to: '/recipes', label: '홈', icon: Home },
-  { to: '/recipes?focus=search', label: '검색', icon: Search },
+  { to: '/recipes/search', label: '검색', icon: Search },
   { to: '/recipes/new', label: '추가', icon: Plus },
   { to: '/recipe-books', label: '레시피북', icon: BookMarked },
   { to: '/settings', label: '설정', icon: Settings },
@@ -20,27 +20,27 @@ export const AppLayout = ({ children, requireAuth = true }: { children: ReactNod
   if (requireAuth && !user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
   return (
-    <div className="min-h-screen bg-[#fff8ec] text-stone-900">
-      <header className="sticky top-0 z-20 border-b border-amber-100 bg-[#fff8ec]/95 backdrop-blur">
+    <div className="min-h-screen bg-[#fff8f5] text-stone-900">
+      <header className="sticky top-0 z-20 bg-[#fff8f5]/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <NavLink to="/recipes" className="flex items-center gap-2 font-bold">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-amber-700 text-white">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-[#ffdbd0] text-[#9a4022]">
               <BookOpen size={19} />
             </span>
-            <span>My Recipe Note</span>
+            <span className="font-serif text-xl text-[#9a4022]">My Recipe Note</span>
           </NavLink>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 pb-28 pt-4">{children}</main>
       {user ? (
-        <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-amber-100 bg-white">
-          <div className="mx-auto grid max-w-3xl grid-cols-5 px-2 py-2">
+        <nav className="fixed bottom-0 left-0 right-0 z-30 rounded-t-xl bg-white shadow-[0_-4px_16px_rgba(154,64,34,0.08)]">
+          <div className="mx-auto grid max-w-3xl grid-cols-5 px-3 py-2">
             {tabs.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={label}
                 to={to}
                 className={({ isActive }) =>
-                  `flex flex-col items-center gap-1 rounded-lg px-2 py-2 text-xs ${isActive ? 'text-amber-800' : 'text-stone-500'}`
+                  `flex flex-col items-center gap-1 rounded-full px-2 py-2 text-xs transition ${isActive ? 'bg-[#ffdbd0] text-[#390b00]' : 'text-[#56423c]'}`
                 }
               >
                 <Icon size={20} />

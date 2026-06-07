@@ -10,7 +10,17 @@ import { supabase } from '../lib/supabaseClient'
 import type { Recipe } from '../types/recipe'
 import { useAuth } from '../hooks/useAuth'
 
-export const RecipeListPage = () => {
+export const RecipeListPage = ({
+  title = '나의 레시피',
+  subtitle = '빠르게 저장하는 개인 레시피 노트',
+  showImportAction = true,
+  autoFocusSearch = false,
+}: {
+  title?: string
+  subtitle?: string
+  showImportAction?: boolean
+  autoFocusSearch?: boolean
+}) => {
   const { user } = useAuth()
   const [searchParams] = useSearchParams()
   const [recipes, setRecipes] = useState<Recipe[]>([])
@@ -35,10 +45,10 @@ export const RecipeListPage = () => {
   }, [user])
 
   useEffect(() => {
-    if (searchParams.get('focus') === 'search') {
+    if (autoFocusSearch || searchParams.get('focus') === 'search') {
       window.setTimeout(() => document.getElementById('recipe-search')?.focus(), 100)
     }
-  }, [searchParams])
+  }, [autoFocusSearch, searchParams])
 
   const filtered = recipes.filter((recipe) => {
     const matchesQuery = [recipe.title, recipe.memo, recipe.steps_text].join(' ').toLowerCase().includes(query.toLowerCase())
@@ -59,19 +69,19 @@ export const RecipeListPage = () => {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-stone-950">나의 레시피</h1>
-          <p className="mt-1 text-sm text-stone-500">빠르게 저장하는 개인 레시피 노트</p>
+          <h1 className="text-2xl font-bold text-stone-950">{title}</h1>
+          <p className="mt-1 text-sm text-stone-500">{subtitle}</p>
         </div>
         <Link to="/recipes/new">
           <Button><Plus size={18} />작성</Button>
         </Link>
       </div>
 
-      <div>
+      {showImportAction ? <div>
         <Link to="/recipes/import">
           <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
         </Link>
-      </div>
+      </div> : null}
 
       <div className="space-y-2 rounded-xl border border-amber-100 bg-white p-3">
         <input id="recipe-search" className="w-full rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-3 text-sm outline-none focus:border-amber-500" placeholder="레시피 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
