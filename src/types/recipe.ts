@@ -1,4 +1,4 @@
-export type RecipeSourceType = 'manual' | 'url' | 'youtube' | 'text'
+export type RecipeSourceType = 'manual' | 'imported'
 
 export type RecipeDifficulty = '쉬움' | '보통' | '어려움'
 
@@ -27,22 +27,6 @@ export interface Recipe extends RecipeInput {
   user_id: string
   created_at: string
   updated_at: string
-}
-
-export interface AiSuggestion {
-  id: string
-  user_id: string
-  recipe_id: string
-  request_text: string
-  suggestion: AiSuggestionPayload
-  created_at: string
-}
-
-export interface AiSuggestionPayload {
-  summary: string
-  updated_recipe: Partial<RecipeInput>
-  shopping_list: string[]
-  notes: string[]
 }
 
 export const emptyRecipeInput = (): RecipeInput => ({

@@ -13,6 +13,9 @@ export const RecipeCard = ({ recipe }: { recipe: Recipe }) => (
           <h2 className="line-clamp-2 text-base font-bold text-stone-950">{recipe.title}</h2>
           <Heart size={18} className={recipe.is_favorite ? 'fill-rose-500 text-rose-500' : 'text-stone-300'} />
         </div>
+        <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${recipe.source_type === 'imported' ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'}`}>
+          {recipe.source_type === 'imported' ? '가져온 레시피' : '내가 만든 레시피'}
+        </span>
         <div className="mt-2 flex flex-wrap gap-1">
           {recipe.tags.slice(0, 3).map((tag) => (
             <span key={tag} className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-800">

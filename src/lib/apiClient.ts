@@ -1,4 +1,4 @@
-import type { AiSuggestionPayload, RecipeInput } from '../types/recipe'
+import type { RecipeInput } from '../types/recipe'
 
 type ApiError = { error?: { message?: string } }
 
@@ -27,6 +27,3 @@ export const importRecipeFromYoutube = (youtubeUrl: string, transcriptText?: str
     | (Partial<RecipeInput> & { source_url: string; youtube_video_id?: string })
     | { needs_manual_text: true; message: string; youtube_video_id: string; source_url: string }
   >('/api/import-youtube', { youtubeUrl, transcriptText })
-
-export const requestRecipeHelp = (recipeId: string, userRequest: string, accessToken: string) =>
-  postJson<AiSuggestionPayload>('/api/recipe-help', { recipeId, userRequest }, accessToken)

@@ -43,14 +43,14 @@ export const RecipeImportPage = () => {
           ...emptyRecipeInput(),
           ...data,
           source_url: data.source_url || url,
-          source_type: 'youtube',
+          source_type: 'imported',
           youtube_video_id: data.youtube_video_id || '',
         })
         return
       }
 
       const data = await importRecipeFromUrl(url)
-      setRecipe({ ...emptyRecipeInput(), ...data, source_url: data.source_url || url, source_type: 'url' })
+      setRecipe({ ...emptyRecipeInput(), ...data, source_url: data.source_url || url, source_type: 'imported' })
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '가져오기에 실패했습니다.')
     } finally {

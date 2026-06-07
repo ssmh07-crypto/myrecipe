@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button } from '../ui/Button'
 import type { RecipeInput } from '../../types/recipe'
@@ -58,6 +58,7 @@ export const RecipeForm = ({
   const [step, setStep] = useState(0)
   const [form, setForm] = useState<RecipeInput>(initialValue)
   const tagText = useMemo(() => form.tags.join(', '), [form.tags])
+  const isImported = form.source_type === 'imported'
 
   const setField = <K extends keyof RecipeInput>(key: K, value: RecipeInput[K]) => setForm((prev) => ({ ...prev, [key]: value }))
   const clean = (items: string[]) => items.map((item) => item.trim()).filter(Boolean)
@@ -144,7 +145,17 @@ export const RecipeForm = ({
           </div>
           <div className="space-y-2">
             <label className={labelClass}>출처 URL</label>
-            <input className={inputClass} value={form.source_url} onChange={(event) => setField('source_url', event.target.value)} />
+            <input
+              className={`${inputClass} ${isImported ? 'bg-stone-50 text-stone-500' : ''}`}
+              value={form.source_url}
+              readOnly={isImported}
+              onChange={(event) => setField('source_url', event.target.value)}
+            />
+            {isImported && form.source_url ? (
+              <a href={form.source_url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-800">
+                <ExternalLink size={17} /> 원본 레시피 보기
+              </a>
+            ) : null}
           </div>
         </section>
       ) : null}

@@ -34,14 +34,28 @@ create table if not exists public.recipes (
   updated_at timestamptz default now()
 );
 
-create table if not exists public.ai_suggestions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) not null,
-  recipe_id uuid references public.recipes(id) on delete cascade,
-  request_text text not null,
-  suggestion jsonb not null,
-  created_at timestamptz default now()
-);
+update public.recipes
+set source_type = 'imported'
+where source_type in ('url', 'youtube', 'text');
+
+update public.recipes
+set source_type = 'manual'
+where source_type is null or source_type = '';
+
+alter table public.recipes
+alter column source_type set default 'manual';
+
+alter table public.recipes
+alter column source_type set not null;
+
+alter table public.recipes
+drop constraint if exists recipes_source_type_check;
+
+alter table public.recipes
+add constraint recipes_source_type_check
+check (source_type in ('manual', 'imported'));
+
+drop table if exists public.ai_suggestions;
 
 create or replace function public.set_updated_at()
 returns trigger as $$
@@ -73,7 +87,6 @@ for each row execute function public.handle_new_user();
 
 alter table public.profiles enable row level security;
 alter table public.recipes enable row level security;
-alter table public.ai_suggestions enable row level security;
 
 drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own"
@@ -105,19 +118,4 @@ with check (auth.uid() = user_id);
 drop policy if exists "recipes_delete_own" on public.recipes;
 create policy "recipes_delete_own"
 on public.recipes for delete
-using (auth.uid() = user_id);
-
-drop policy if exists "ai_suggestions_select_own" on public.ai_suggestions;
-create policy "ai_suggestions_select_own"
-on public.ai_suggestions for select
-using (auth.uid() = user_id);
-
-drop policy if exists "ai_suggestions_insert_own" on public.ai_suggestions;
-create policy "ai_suggestions_insert_own"
-on public.ai_suggestions for insert
-with check (auth.uid() = user_id);
-
-drop policy if exists "ai_suggestions_delete_own" on public.ai_suggestions;
-create policy "ai_suggestions_delete_own"
-on public.ai_suggestions for delete
 using (auth.uid() = user_id);
