@@ -1,5 +1,5 @@
 import { Camera, ExternalLink, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { compressRecipeImage } from '../../lib/imageCompression'
 import { cleanIngredientItems, formatIngredientItems, parseIngredientText } from '../../lib/ingredients'
 import type { IngredientItem, RecipeFormResult, RecipeInput } from '../../types/recipe'
@@ -99,6 +99,7 @@ export const RecipeForm = ({
   const [removeImage, setRemoveImage] = useState(false)
   const [stepImageFiles, setStepImageFiles] = useState<Record<number, File>>({})
   const [stepImagePreviews, setStepImagePreviews] = useState<Record<number, string>>({})
+  const stepImagePreviewsRef = useRef<Record<number, string>>({})
   const [removeStepImageIndexes, setRemoveStepImageIndexes] = useState<number[]>([])
   const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : ''), [imageFile])
   const visibleImage = previewUrl || (!removeImage ? form.image_url : '')
@@ -110,6 +111,16 @@ export const RecipeForm = ({
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
   }, [previewUrl])
+
+  useEffect(() => {
+    return () => {
+      Object.values(stepImagePreviewsRef.current).forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
+
+  useEffect(() => {
+    stepImagePreviewsRef.current = stepImagePreviews
+  }, [stepImagePreviews])
 
   const setField = <K extends keyof RecipeInput>(key: K, value: RecipeInput[K]) => setForm((prev) => ({ ...prev, [key]: value }))
 

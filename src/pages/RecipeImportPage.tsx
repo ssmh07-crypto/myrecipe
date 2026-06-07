@@ -6,8 +6,8 @@ import { Button } from '../components/ui/Button'
 import { ErrorState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
 import { importRecipeFromUrl } from '../lib/apiClient'
+import { uploadRecipeAssets } from '../lib/recipePersistence'
 import { normalizeRecipeInput } from '../lib/recipes'
-import { uploadRecipeImage, uploadRecipeStepImage } from '../lib/storage'
 import { supabase } from '../lib/supabaseClient'
 import { emptyRecipeInput, type RecipeFormResult, type RecipeInput } from '../types/recipe'
 
@@ -40,16 +40,9 @@ export const RecipeImportPage = () => {
     try {
       const { data, error: nextError } = await supabase.from('recipes').insert({ ...value, user_id: user.id }).select('id').single()
       if (nextError) throw new Error(nextError.message)
-      if (imageFile) {
-        const imageUrl = await uploadRecipeImage(user.id, data.id, imageFile)
-        await supabase.from('recipes').update({ image_url: imageUrl }).eq('id', data.id)
-      }
-      const stepImages = [...value.step_images]
-      for (const [index, file] of Object.entries(stepImageFiles)) {
-        stepImages[Number(index)] = await uploadRecipeStepImage(user.id, data.id, Number(index), file)
-      }
-      if (Object.keys(stepImageFiles).length) {
-        await supabase.from('recipes').update({ step_images: stepImages }).eq('id', data.id)
+      if (imageFile || Object.keys(stepImageFiles).length) {
+        const assets = await uploadRecipeAssets({ userId: user.id, recipeId: data.id, recipe: value, imageFile, stepImageFiles })
+        await supabase.from('recipes').update(assets).eq('id', data.id)
       }
       navigate(`/recipes/${data.id}`)
     } catch (nextError) {

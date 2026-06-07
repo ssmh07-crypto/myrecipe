@@ -8,6 +8,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
+const maxHtmlBytes = 500_000
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -48,6 +50,28 @@ const getOembedText = async (url: URL) => {
     return [data.title, data.author_name].filter(Boolean).join('\n')
   }
   return ''
+}
+
+const readLimitedText = async (response: Response) => {
+  if (!response.body) return response.text()
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let received = 0
+  let text = ''
+
+  while (received < maxHtmlBytes) {
+    const { done, value } = await reader.read()
+    if (done) break
+    received += value.byteLength
+    text += decoder.decode(value, { stream: true })
+    if (received >= maxHtmlBytes) {
+      await reader.cancel()
+      break
+    }
+  }
+
+  return text + decoder.decode()
 }
 
 const recipeSchema = {
@@ -133,11 +157,10 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const response = await fetch(url.toString(), {
       signal: controller.signal,
       headers: { 'User-Agent': 'MyRecipeNoteBot/1.0' },
-    })
-    clearTimeout(timeout)
+    }).finally(() => clearTimeout(timeout))
 
     if (!response.ok) return error('해당 링크를 가져올 수 없습니다.', 502)
-    const html = await response.text()
+    const html = await readLimitedText(response)
     const oembedText = await getOembedText(url)
     const metaText = [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n')
     const pageText = sanitizeText(html)

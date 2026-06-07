@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { RecipeForm } from '../components/recipe/RecipeForm'
 import { ErrorState, LoadingState } from '../components/ui/State'
+import { uploadRecipeAssets } from '../lib/recipePersistence'
 import { normalizeRecipe } from '../lib/recipes'
-import { uploadRecipeImage, uploadRecipeStepImage } from '../lib/storage'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import type { Recipe, RecipeFormResult } from '../types/recipe'
@@ -33,16 +33,8 @@ export const RecipeEditPage = () => {
     setSaving(true)
     setError('')
     try {
-      let imageUrl = removeImage ? '' : value.image_url
-      if (imageFile) imageUrl = await uploadRecipeImage(user.id, id, imageFile)
-      const stepImages = [...value.step_images]
-      removeStepImageIndexes.forEach((index) => {
-        stepImages[index] = ''
-      })
-      for (const [index, file] of Object.entries(stepImageFiles)) {
-        stepImages[Number(index)] = await uploadRecipeStepImage(user.id, id, Number(index), file)
-      }
-      const { error: nextError } = await supabase.from('recipes').update({ ...value, image_url: imageUrl, step_images: stepImages }).eq('id', id)
+      const assets = await uploadRecipeAssets({ userId: user.id, recipeId: id, recipe: value, imageFile, removeImage, stepImageFiles, removeStepImageIndexes })
+      const { error: nextError } = await supabase.from('recipes').update({ ...value, ...assets }).eq('id', id)
       if (nextError) throw new Error(nextError.message)
       navigate(`/recipes/${id}`)
     } catch (nextError) {
