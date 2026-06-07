@@ -3,8 +3,12 @@ create extension if not exists "pgcrypto";
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text,
+  display_name text,
   created_at timestamptz default now()
 );
+
+alter table public.profiles
+add column if not exists display_name text;
 
 create table if not exists public.recipes (
   id uuid primary key default gen_random_uuid(),
@@ -55,8 +59,8 @@ for each row execute function public.set_updated_at();
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email)
-  values (new.id, new.email)
+  insert into public.profiles (id, email, display_name)
+  values (new.id, new.email, new.raw_user_meta_data ->> 'display_name')
   on conflict (id) do nothing;
   return new;
 end;

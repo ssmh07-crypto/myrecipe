@@ -5,10 +5,15 @@ import { supabase } from '../lib/supabaseClient'
 
 export const SettingsPage = () => {
   const { user } = useAuth()
+  const displayName = user?.user_metadata?.display_name as string | undefined
 
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold text-stone-950">설정</h1>
+      <div className="rounded-xl border border-amber-100 bg-white p-4">
+        <p className="text-sm text-stone-500">이름</p>
+        <p className="mt-1 font-semibold text-stone-950">{displayName || '이름 없음'}</p>
+      </div>
       <div className="rounded-xl border border-amber-100 bg-white p-4">
         <p className="text-sm text-stone-500">로그인 계정</p>
         <p className="mt-1 font-semibold text-stone-950">{user?.email}</p>

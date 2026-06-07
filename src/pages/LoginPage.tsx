@@ -13,6 +13,7 @@ export const LoginPage = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -36,7 +37,15 @@ export const LoginPage = () => {
     const result =
       mode === 'login'
         ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                display_name: displayName.trim(),
+              },
+            },
+          })
     setLoading(false)
 
     if (result.error) {
@@ -72,6 +81,17 @@ export const LoginPage = () => {
               회원가입
             </button>
           </div>
+          {mode === 'signup' ? (
+            <input
+              className="w-full rounded-lg border border-amber-100 px-3 py-3 text-sm outline-none focus:border-amber-500"
+              type="text"
+              required
+              maxLength={40}
+              placeholder="이름"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          ) : null}
           <input className="w-full rounded-lg border border-amber-100 px-3 py-3 text-sm outline-none focus:border-amber-500" type="email" required placeholder="이메일" value={email} onChange={(event) => setEmail(event.target.value)} />
           <input className="w-full rounded-lg border border-amber-100 px-3 py-3 text-sm outline-none focus:border-amber-500" type="password" required minLength={6} placeholder="비밀번호" value={password} onChange={(event) => setPassword(event.target.value)} />
           {error ? <ErrorState message={error} /> : null}
