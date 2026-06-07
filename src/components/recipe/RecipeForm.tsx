@@ -97,8 +97,12 @@ export const RecipeForm = ({
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imageError, setImageError] = useState('')
   const [removeImage, setRemoveImage] = useState(false)
+  const [stepImageFiles, setStepImageFiles] = useState<Record<number, File>>({})
+  const [stepImagePreviews, setStepImagePreviews] = useState<Record<number, string>>({})
+  const [removeStepImageIndexes, setRemoveStepImageIndexes] = useState<number[]>([])
   const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : ''), [imageFile])
   const visibleImage = previewUrl || (!removeImage ? form.image_url : '')
+  const steps = form.steps_text.split('\n').map((step) => step.trim()).filter(Boolean)
   const isImported = form.source_type === 'imported'
 
   useEffect(() => {
@@ -124,17 +128,55 @@ export const RecipeForm = ({
     }
   }
 
+  const handleStepFile = async (stepIndex: number, file: File | null) => {
+    setImageError('')
+    if (!file) return
+    if (!allowedTypes.includes(file.type)) {
+      setImageError('단계 사진은 jpg, jpeg, png, webp만 업로드할 수 있습니다.')
+      return
+    }
+    try {
+      const compressed = await compressRecipeImage(file)
+      setStepImageFiles((prev) => ({ ...prev, [stepIndex]: compressed }))
+      setStepImagePreviews((prev) => {
+        if (prev[stepIndex]) URL.revokeObjectURL(prev[stepIndex])
+        return { ...prev, [stepIndex]: URL.createObjectURL(compressed) }
+      })
+      setRemoveStepImageIndexes((prev) => prev.filter((index) => index !== stepIndex))
+    } catch (nextError) {
+      setImageError(nextError instanceof Error ? nextError.message : '단계 사진 압축에 실패했습니다.')
+    }
+  }
+
+  const removeStepImage = (stepIndex: number) => {
+    setStepImageFiles((prev) => {
+      const next = { ...prev }
+      delete next[stepIndex]
+      return next
+    })
+    setStepImagePreviews((prev) => {
+      if (prev[stepIndex]) URL.revokeObjectURL(prev[stepIndex])
+      const next = { ...prev }
+      delete next[stepIndex]
+      return next
+    })
+    setRemoveStepImageIndexes((prev) => Array.from(new Set([...prev, stepIndex])))
+  }
+
   const handleSubmit = async () => {
     if (imageError) return
     await onSubmit({
       imageFile,
       removeImage,
+      stepImageFiles,
+      removeStepImageIndexes,
       recipe: {
         ...form,
         title: form.title.trim(),
         ingredients: cleanIngredientItems(form.ingredients),
         seasonings: cleanIngredientItems(form.seasonings),
         steps_text: form.steps_text.trim(),
+        step_images: form.step_images.slice(0, steps.length),
         memo: form.memo.trim(),
         source_type: isImported ? 'imported' : 'manual',
         source_url: isImported ? initialValue.source_url : form.source_url.trim(),
@@ -169,6 +211,14 @@ export const RecipeForm = ({
           <label className={labelClass}>인분</label>
           <input className={inputClass} type="number" min={0} value={form.servings ?? ''} onChange={(event) => setField('servings', Number(event.target.value) || null)} />
         </div>
+        <div className="space-y-2">
+          <label className={labelClass}>난이도</label>
+          <select className={inputClass} value={form.difficulty} onChange={(event) => setField('difficulty', event.target.value)}>
+            <option>쉬움</option>
+            <option>보통</option>
+            <option>어려움</option>
+          </select>
+        </div>
       </section>
 
       <IngredientEditor label="재료" items={form.ingredients} onChange={(items) => setField('ingredients', items)} />
@@ -177,6 +227,31 @@ export const RecipeForm = ({
       <section className="space-y-2 rounded-xl border border-amber-100 bg-white/70 p-4">
         <label className={labelClass}>조리순서</label>
         <textarea className={inputClass} rows={9} style={{ minHeight: 220 }} value={form.steps_text} onChange={(event) => setField('steps_text', event.target.value)} placeholder="1. 재료를 손질한다&#10;2. 팬에 볶는다&#10;3. 간을 맞춘다" />
+        {steps.length ? (
+          <div className="mt-4 space-y-3">
+            <p className={labelClass}>단계별 사진</p>
+            {steps.map((step, index) => {
+              const imageUrl = stepImagePreviews[index] || (!removeStepImageIndexes.includes(index) ? form.step_images[index] : '')
+              return (
+                <div key={`${step}-${index}`} className="rounded-lg border border-amber-100 bg-white p-3">
+                  <p className="line-clamp-2 text-sm font-semibold text-stone-700">{String(index + 1).padStart(2, '0')}. {step}</p>
+                  {imageUrl ? (
+                    <div className="relative mt-3 overflow-hidden rounded-lg">
+                      <img src={imageUrl} alt="" className="h-36 w-full object-cover" />
+                      <button type="button" aria-label="단계 사진 삭제" className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-stone-700" onClick={() => removeStepImage(index)}>
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : null}
+                  <label className="mt-3 flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-amber-50 text-sm font-semibold text-amber-800">
+                    <Camera size={16} /> {imageUrl ? '사진 변경' : '사진 첨부'}
+                    <input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleStepFile(index, event.target.files?.[0] || null)} />
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
       </section>
 
       <section className="space-y-2 rounded-xl border border-amber-100 bg-white/70 p-4">

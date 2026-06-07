@@ -15,25 +15,31 @@ create table if not exists public.recipes (
   user_id uuid references auth.users(id) not null,
   title text not null,
   servings integer,
+  difficulty text default '쉬움',
   image_url text,
   ingredients jsonb default '[]'::jsonb,
   seasonings jsonb default '[]'::jsonb,
   steps_text text,
+  step_images jsonb default '[]'::jsonb,
   memo text,
   source_url text,
   source_type text default 'manual' not null,
+  is_favorite boolean default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
 alter table public.recipes add column if not exists servings integer;
+alter table public.recipes add column if not exists difficulty text default '쉬움';
 alter table public.recipes add column if not exists image_url text;
 alter table public.recipes add column if not exists ingredients jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists seasonings jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists steps_text text;
+alter table public.recipes add column if not exists step_images jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists memo text;
 alter table public.recipes add column if not exists source_url text;
 alter table public.recipes add column if not exists source_type text default 'manual';
+alter table public.recipes add column if not exists is_favorite boolean default false;
 alter table public.recipes add column if not exists updated_at timestamptz default now();
 
 do $$
@@ -98,14 +104,12 @@ check (source_type in ('manual', 'imported'));
 
 alter table public.recipes drop column if exists description;
 alter table public.recipes drop column if exists cooking_time;
-alter table public.recipes drop column if exists difficulty;
 alter table public.recipes drop column if exists steps;
 alter table public.recipes drop column if exists tips;
 alter table public.recipes drop column if exists tags;
 alter table public.recipes drop column if exists personal_note;
 alter table public.recipes drop column if exists next_time_note;
 alter table public.recipes drop column if exists youtube_video_id;
-alter table public.recipes drop column if exists is_favorite;
 
 create table if not exists public.recipe_folders (
   id uuid primary key default gen_random_uuid(),

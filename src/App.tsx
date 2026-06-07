@@ -22,7 +22,7 @@ function App() {
       <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
       <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
       <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
-      <Route path="/recipes/:id" element={<AppLayout><RecipeDetailPage /></AppLayout>} />
+      <Route path="/recipes/:id" element={<AppLayout hideHeader hideNav><RecipeDetailPage /></AppLayout>} />
       <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />
       <Route path="/recipe-books" element={<AppLayout><RecipeBookPage /></AppLayout>} />
       <Route path="/favorites" element={<AppLayout><FavoritesPage /></AppLayout>} />

@@ -59,6 +59,7 @@ const recipeSchema = {
     properties: {
       title: { type: 'string' },
       servings: { type: 'number' },
+      difficulty: { type: 'string', enum: ['쉬움', '보통', '어려움'] },
       ingredients: {
         type: 'array',
         items: {
@@ -86,9 +87,10 @@ const recipeSchema = {
         },
       },
       steps_text: { type: 'string' },
+      step_images: { type: 'array', items: { type: 'string' } },
       memo: { type: 'string' },
     },
-    required: ['title', 'servings', 'ingredients', 'seasonings', 'steps_text', 'memo'],
+    required: ['title', 'servings', 'difficulty', 'ingredients', 'seasonings', 'steps_text', 'step_images', 'memo'],
   },
 }
 

@@ -8,8 +8,8 @@ const getExtension = (file: File) => {
   return extension === 'jpeg' ? 'jpg' : extension
 }
 
-export const uploadRecipeImage = async (userId: string, recipeId: string, file: File) => {
-  const path = `${userId}/${recipeId}/${crypto.randomUUID()}.${getExtension(file)}`
+const uploadImage = async (userId: string, recipeId: string, file: File, folder = 'cover') => {
+  const path = `${userId}/${recipeId}/${folder}/${crypto.randomUUID()}.${getExtension(file)}`
   const { error } = await supabase.storage.from(bucketName).upload(path, file, {
     cacheControl: '3600',
     upsert: true,
@@ -19,3 +19,8 @@ export const uploadRecipeImage = async (userId: string, recipeId: string, file: 
   const { data } = supabase.storage.from(bucketName).getPublicUrl(path)
   return data.publicUrl
 }
+
+export const uploadRecipeImage = (userId: string, recipeId: string, file: File) => uploadImage(userId, recipeId, file, 'cover')
+
+export const uploadRecipeStepImage = (userId: string, recipeId: string, stepIndex: number, file: File) =>
+  uploadImage(userId, recipeId, file, `steps/${stepIndex}`)
