@@ -120,8 +120,7 @@ create table if not exists public.recipe_folder_items (
   user_id uuid references auth.users(id) not null,
   folder_id uuid references public.recipe_folders(id) on delete cascade not null,
   recipe_id uuid references public.recipes(id) on delete cascade not null,
-  created_at timestamptz default now(),
-  unique (folder_id, recipe_id)
+  created_at timestamptz default now()
 );
 
 alter table public.recipe_folder_items
