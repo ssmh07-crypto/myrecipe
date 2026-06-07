@@ -7,7 +7,7 @@ import { LoadingState } from '../ui/State'
 const tabs = [
   { to: '/recipes', label: '홈', icon: Home },
   { to: '/recipes/search', label: '검색', icon: Search },
-  { to: '/recipes/new', label: '추가', icon: Plus },
+  { to: '/recipes/add', label: '추가', icon: Plus },
   { to: '/recipe-books', label: '레시피북', icon: BookMarked },
   { to: '/premium', label: 'Premium', icon: Sparkles },
 ]

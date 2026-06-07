@@ -58,6 +58,7 @@ export const HomePage = () => {
   useEffect(() => {
     const preloadImportPage = () => {
       void import('./RecipeImportPage')
+      void import('./RecipeAddPage')
     }
     const idleId = window.requestIdleCallback?.(preloadImportPage)
     if (!idleId) {

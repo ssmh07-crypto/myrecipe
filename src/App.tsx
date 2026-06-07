@@ -9,6 +9,7 @@ const FavoritesPage = lazy(() => import('./pages/FavoritesPage').then((module) =
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
 const PremiumPage = lazy(() => import('./pages/PremiumPage').then((module) => ({ default: module.PremiumPage })))
 const RecipeBookPage = lazy(() => import('./pages/RecipeBookPage').then((module) => ({ default: module.RecipeBookPage })))
+const RecipeAddPage = lazy(() => import('./pages/RecipeAddPage').then((module) => ({ default: module.RecipeAddPage })))
 const RecipeDetailPage = lazy(() => import('./pages/RecipeDetailPage').then((module) => ({ default: module.RecipeDetailPage })))
 const RecipeEditPage = lazy(() => import('./pages/RecipeEditPage').then((module) => ({ default: module.RecipeEditPage })))
 const RecipeImportPage = lazy(() => import('./pages/RecipeImportPage').then((module) => ({ default: module.RecipeImportPage })))
@@ -32,6 +33,7 @@ function App() {
           <Route path="/recipes" element={<AppLayout requireAuth={false}><HomePage /></AppLayout>} />
           <Route path="/recipes/recent" element={<AppLayout requireAuth={false}><RecipeListPage title="최근 레시피" subtitle="최근에 등록한 레시피를 최신순으로 모았습니다." showImportAction={false} /></AppLayout>} />
           <Route path="/recipes/search" element={<AppLayout requireAuth={false}><RecipeListPage title="레시피 검색" subtitle="저장한 레시피를 이름과 메모로 찾아보세요." showImportAction={false} /></AppLayout>} />
+          <Route path="/recipes/add" element={<AppLayout><RecipeAddPage /></AppLayout>} />
           <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
           <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
           <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
