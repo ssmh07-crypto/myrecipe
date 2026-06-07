@@ -26,7 +26,7 @@ export const AppLayout = ({
   const { user, loading } = useAuth()
   const location = useLocation()
 
-  if (loading) return <main className="min-h-screen bg-[#fff8ec] p-4"><LoadingState /></main>
+  if (loading && requireAuth) return <main className="min-h-screen bg-[#fff8ec] p-4"><LoadingState /></main>
   if (requireAuth && !user) return <Navigate to="/login" replace />
 
   return (

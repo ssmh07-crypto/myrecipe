@@ -55,6 +55,18 @@ export const HomePage = () => {
     void load()
   }, [user])
 
+  useEffect(() => {
+    const preloadImportPage = () => {
+      void import('./RecipeImportPage')
+    }
+    const idleId = window.requestIdleCallback?.(preloadImportPage)
+    if (!idleId) {
+      const timer = window.setTimeout(preloadImportPage, 800)
+      return () => window.clearTimeout(timer)
+    }
+    return () => window.cancelIdleCallback?.(idleId)
+  }, [])
+
   const counts = useMemo(
     () => ({
       total: recipes.length,
@@ -82,7 +94,7 @@ export const HomePage = () => {
             <h2 className="font-serif text-2xl font-semibold text-white">Import from anywhere</h2>
             <p className="text-sm leading-6 text-white/90">권한이 있는 웹 레시피 링크를 붙여넣으면 주방에서 바로 쓰기 좋은 개인 레시피 초안으로 정리합니다.</p>
           </div>
-          <Link to={user ? '/recipes/import' : '/login'}>
+          <Link to="/recipes/import">
             <Button variant="secondary" className="bg-white text-[#9a4022]">
               <Link2 size={18} /> Import via Link
             </Button>
