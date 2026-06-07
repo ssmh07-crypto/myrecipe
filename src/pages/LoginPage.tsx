@@ -1,7 +1,7 @@
 import { ChefHat } from 'lucide-react'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
 import { Button } from '../components/ui/Button'
 import { ErrorState } from '../components/ui/State'
@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabaseClient'
 export const LoginPage = () => {
   const { user, isConfigured } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -42,7 +43,11 @@ export const LoginPage = () => {
       setError(result.error.message)
       return
     }
-    if (mode === 'signup') setNotice('가입 요청이 완료되었습니다. Supabase 설정에 따라 이메일 확인이 필요할 수 있습니다.')
+    if (mode === 'signup' && result.data.session) {
+      navigate('/recipes', { replace: true })
+      return
+    }
+    if (mode === 'signup') setNotice('가입 요청이 완료되었습니다. 이메일 확인 후 로그인할 수 있습니다.')
   }
 
   return (
