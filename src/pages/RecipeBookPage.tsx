@@ -59,10 +59,13 @@ export const RecipeBookPage = () => {
   const submitFolder = async (event: FormEvent) => {
     event.preventDefault()
     if (!user || !name.trim()) return
-    if (editingId) {
-      await supabase.from('recipe_folders').update({ name: name.trim() }).eq('id', editingId)
-    } else {
-      await supabase.from('recipe_folders').insert({ name: name.trim(), user_id: user.id })
+    setError('')
+    const result = editingId
+      ? await supabase.from('recipe_folders').update({ name: name.trim() }).eq('id', editingId)
+      : await supabase.from('recipe_folders').insert({ name: name.trim(), user_id: user.id })
+    if (result.error) {
+      setError(result.error.message)
+      return
     }
     setName('')
     setEditingId('')
@@ -70,7 +73,12 @@ export const RecipeBookPage = () => {
   }
 
   const deleteFolder = async (folderId: string) => {
-    await supabase.from('recipe_folders').delete().eq('id', folderId)
+    setError('')
+    const { error: nextError } = await supabase.from('recipe_folders').delete().eq('id', folderId)
+    if (nextError) {
+      setError(nextError.message)
+      return
+    }
     if (selectedFolderId === folderId) setSelectedFolderId('')
     await load()
   }

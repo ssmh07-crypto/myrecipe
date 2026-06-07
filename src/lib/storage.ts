@@ -4,7 +4,8 @@ const bucketName = 'recipe-images'
 
 const getExtension = (file: File) => {
   const fallback = file.type.split('/')[1] || 'jpg'
-  return file.name.split('.').pop()?.toLowerCase() || fallback
+  const extension = file.name.split('.').pop()?.toLowerCase() || fallback
+  return extension === 'jpeg' ? 'jpg' : extension
 }
 
 export const uploadRecipeImage = async (userId: string, recipeId: string, file: File) => {

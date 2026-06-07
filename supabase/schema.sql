@@ -42,11 +42,22 @@ begin
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'recipes' and column_name = 'steps'
   ) then
-    execute $sql$
-      update public.recipes
-      set steps_text = array_to_string(array(select jsonb_array_elements_text(steps)), E'\n')
-      where steps_text is null and jsonb_typeof(coalesce(steps, '[]'::jsonb)) = 'array'
-    $sql$;
+    if exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = 'recipes' and column_name = 'steps' and data_type = 'jsonb'
+    ) then
+      execute $sql$
+        update public.recipes
+        set steps_text = array_to_string(array(select jsonb_array_elements_text(steps)), E'\n')
+        where steps_text is null and jsonb_typeof(coalesce(steps, '[]'::jsonb)) = 'array'
+      $sql$;
+    else
+      execute $sql$
+        update public.recipes
+        set steps_text = array_to_string(steps, E'\n')
+        where steps_text is null
+      $sql$;
+    end if;
   end if;
 end $$;
 
@@ -112,6 +123,12 @@ create table if not exists public.recipe_folder_items (
   created_at timestamptz default now(),
   unique (folder_id, recipe_id)
 );
+
+alter table public.recipe_folder_items
+drop constraint if exists recipe_folder_items_folder_id_recipe_id_key;
+
+alter table public.recipe_folder_items
+add constraint recipe_folder_items_folder_id_recipe_id_key unique (folder_id, recipe_id);
 
 drop table if exists public.ai_suggestions;
 

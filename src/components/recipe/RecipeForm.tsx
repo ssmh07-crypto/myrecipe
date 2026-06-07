@@ -46,6 +46,7 @@ const IngredientEditor = ({
 
   const switchMode = (nextMode: 'bulk' | 'rows') => {
     if (mode === 'bulk') onChange(parseIngredientText(bulkText))
+    if (nextMode === 'bulk') setBulkText(formatIngredientItems(items))
     setMode(nextMode)
   }
 
@@ -123,6 +124,7 @@ export const RecipeForm = ({
   }
 
   const handleSubmit = async () => {
+    if (imageError) return
     await onSubmit({
       imageFile,
       removeImage,

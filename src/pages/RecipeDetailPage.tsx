@@ -71,7 +71,7 @@ export const RecipeDetailPage = () => {
       await supabase.from('recipe_folder_items').delete().eq('folder_id', folderId).eq('recipe_id', recipe.id)
       setSelectedFolderIds((prev) => prev.filter((id) => id !== folderId))
     } else {
-      await supabase.from('recipe_folder_items').insert({ folder_id: folderId, recipe_id: recipe.id, user_id: user.id })
+      await supabase.from('recipe_folder_items').upsert({ folder_id: folderId, recipe_id: recipe.id, user_id: user.id }, { onConflict: 'folder_id,recipe_id' })
       setSelectedFolderIds((prev) => [...prev, folderId])
     }
   }

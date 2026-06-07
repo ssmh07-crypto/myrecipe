@@ -17,6 +17,7 @@ export const RecipeImportPage = () => {
   const [url, setUrl] = useState('')
   const [recipe, setRecipe] = useState<RecipeInput | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const importRecipe = async () => {
@@ -34,13 +35,21 @@ export const RecipeImportPage = () => {
 
   const saveRecipe = async ({ recipe: value, imageFile }: RecipeFormResult) => {
     if (!user) return
-    const { data, error: nextError } = await supabase.from('recipes').insert({ ...value, user_id: user.id }).select('id').single()
-    if (nextError) throw new Error(nextError.message)
-    if (imageFile) {
-      const imageUrl = await uploadRecipeImage(user.id, data.id, imageFile)
-      await supabase.from('recipes').update({ image_url: imageUrl }).eq('id', data.id)
+    setSaving(true)
+    setError('')
+    try {
+      const { data, error: nextError } = await supabase.from('recipes').insert({ ...value, user_id: user.id }).select('id').single()
+      if (nextError) throw new Error(nextError.message)
+      if (imageFile) {
+        const imageUrl = await uploadRecipeImage(user.id, data.id, imageFile)
+        await supabase.from('recipes').update({ image_url: imageUrl }).eq('id', data.id)
+      }
+      navigate(`/recipes/${data.id}`)
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : '레시피 저장에 실패했습니다.')
+    } finally {
+      setSaving(false)
     }
-    navigate(`/recipes/${data.id}`)
   }
 
   return (
@@ -59,7 +68,7 @@ export const RecipeImportPage = () => {
       {recipe ? (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-stone-700">저장 전 내용을 확인하고 수정하세요.</p>
-          <RecipeForm initialValue={recipe} submitLabel="내 레시피로 저장" onSubmit={saveRecipe} />
+          <RecipeForm initialValue={recipe} submitLabel="내 레시피로 저장" loading={saving} onSubmit={saveRecipe} />
         </div>
       ) : null}
     </section>

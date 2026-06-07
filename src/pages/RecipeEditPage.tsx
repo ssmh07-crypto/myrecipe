@@ -31,12 +31,15 @@ export const RecipeEditPage = () => {
   const updateRecipe = async ({ recipe: value, imageFile, removeImage }: RecipeFormResult) => {
     if (!id || !user) return
     setSaving(true)
+    setError('')
     try {
       let imageUrl = removeImage ? '' : value.image_url
       if (imageFile) imageUrl = await uploadRecipeImage(user.id, id, imageFile)
       const { error: nextError } = await supabase.from('recipes').update({ ...value, image_url: imageUrl }).eq('id', id)
       if (nextError) throw new Error(nextError.message)
       navigate(`/recipes/${id}`)
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : '레시피 수정에 실패했습니다.')
     } finally {
       setSaving(false)
     }
