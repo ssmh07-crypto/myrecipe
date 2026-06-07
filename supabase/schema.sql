@@ -274,3 +274,5 @@ using (
   bucket_id = 'recipe-images'
   and auth.uid()::text = (storage.foldername(name))[1]
 );
+
+notify pgrst, 'reload schema';

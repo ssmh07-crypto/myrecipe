@@ -1,5 +1,6 @@
 import { Camera, ExternalLink, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { compressRecipeImage } from '../../lib/imageCompression'
 import { cleanIngredientItems, formatIngredientItems, parseIngredientText } from '../../lib/ingredients'
 import type { IngredientItem, RecipeFormResult, RecipeInput } from '../../types/recipe'
 import { Button } from '../ui/Button'
@@ -108,19 +109,19 @@ export const RecipeForm = ({
 
   const setField = <K extends keyof RecipeInput>(key: K, value: RecipeInput[K]) => setForm((prev) => ({ ...prev, [key]: value }))
 
-  const handleFile = (file: File | null) => {
+  const handleFile = async (file: File | null) => {
     setImageError('')
     if (!file) return
     if (!allowedTypes.includes(file.type)) {
       setImageError('jpg, jpeg, png, webp 이미지만 업로드할 수 있습니다.')
       return
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageError('이미지는 최대 5MB까지 업로드할 수 있습니다.')
-      return
+    try {
+      setImageFile(await compressRecipeImage(file))
+      setRemoveImage(false)
+    } catch (nextError) {
+      setImageError(nextError instanceof Error ? nextError.message : '이미지 압축에 실패했습니다.')
     }
-    setImageFile(file)
-    setRemoveImage(false)
   }
 
   const handleSubmit = async () => {
@@ -154,7 +155,7 @@ export const RecipeForm = ({
         </div>
         <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 text-sm font-semibold text-amber-800">
           <Camera size={18} /> {visibleImage ? '사진 변경' : '사진 선택'}
-          <input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => handleFile(event.target.files?.[0] || null)} />
+          <input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleFile(event.target.files?.[0] || null)} />
         </label>
       </section>
       {imageError ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{imageError}</p> : null}
