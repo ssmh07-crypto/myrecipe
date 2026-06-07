@@ -31,7 +31,11 @@ export const RecipeListPage = ({
 
   useEffect(() => {
     const load = async () => {
-      if (!user) return
+      if (!user) {
+        setRecipes([])
+        setLoading(false)
+        return
+      }
       setLoading(true)
       const { data, error: nextError } = await supabase.from('recipes').select('*').order('created_at', { ascending: false })
       setLoading(false)
@@ -72,13 +76,13 @@ export const RecipeListPage = ({
           <h1 className="text-2xl font-bold text-stone-950">{title}</h1>
           <p className="mt-1 text-sm text-stone-500">{subtitle}</p>
         </div>
-        <Link to="/recipes/new">
+        <Link to={user ? '/recipes/new' : '/login'}>
           <Button><Plus size={18} />작성</Button>
         </Link>
       </div>
 
       {showImportAction ? <div>
-        <Link to="/recipes/import">
+        <Link to={user ? '/recipes/import' : '/login'}>
           <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
         </Link>
       </div> : null}
@@ -103,8 +107,8 @@ export const RecipeListPage = ({
       {!loading && filtered.length === 0 ? (
         <EmptyState
           title="저장된 레시피가 없습니다."
-          description="직접 작성하거나 샘플 레시피 3개를 저장해 시작할 수 있습니다."
-          action={<div className="flex justify-center gap-2"><Link to="/recipes/new"><Button>새 레시피</Button></Link><Button type="button" variant="secondary" onClick={seedSamples}>샘플 저장</Button></div>}
+          description={user ? '직접 작성하거나 샘플 레시피 3개를 저장해 시작할 수 있습니다.' : '비회원은 둘러보기만 가능합니다. 저장된 레시피를 보려면 로그인해 주세요.'}
+          action={<div className="flex justify-center gap-2"><Link to={user ? '/recipes/new' : '/login'}><Button>{user ? '새 레시피' : '로그인하기'}</Button></Link>{user ? <Button type="button" variant="secondary" onClick={seedSamples}>샘플 저장</Button> : null}</div>}
         />
       ) : null}
       <div className="space-y-3">{filtered.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} />)}</div>

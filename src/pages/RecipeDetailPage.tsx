@@ -1,4 +1,4 @@
-import { ArrowLeft, BookMarked, Edit, ExternalLink, Heart, PlayCircle, Share2, Signal, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookMarked, Download, Edit, ExternalLink, Heart, PlayCircle, Share2, Signal, Trash2, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
@@ -109,6 +109,10 @@ export const RecipeDetailPage = () => {
     }
   }
 
+  const exportPdf = () => {
+    window.print()
+  }
+
   if (loading) return <main className="min-h-screen bg-[#fff8f5] p-4"><LoadingState /></main>
   if (error && !recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message={error} /></main>
   if (!recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message="레시피를 찾을 수 없습니다." /></main>
@@ -117,8 +121,8 @@ export const RecipeDetailPage = () => {
   const seasonings = recipe.seasonings.map((item) => formatIngredientItems([item]))
 
   return (
-    <article className="min-h-screen bg-[#fff8f5] pb-28 text-[#1e1b18]">
-      <header className="sticky top-0 z-50 bg-[#fff8f5]/95 shadow-sm backdrop-blur">
+    <article className="recipe-print min-h-screen bg-[#fff8f5] pb-28 text-[#1e1b18]">
+      <header className="no-print sticky top-0 z-50 bg-[#fff8f5]/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-2">
           <div className="flex items-center gap-3">
             <button type="button" aria-label="뒤로" className="grid h-10 w-10 place-items-center rounded-full text-[#9a4022] active:scale-95" onClick={() => navigate(-1)}>
@@ -132,6 +136,9 @@ export const RecipeDetailPage = () => {
             </button>
             <button type="button" aria-label="공유" className="grid h-10 w-10 place-items-center rounded-full text-[#9a4022]" onClick={() => void shareRecipe()}>
               <Share2 size={21} />
+            </button>
+            <button type="button" aria-label="PDF로 내보내기" className="grid h-10 w-10 place-items-center rounded-full text-[#9a4022]" onClick={exportPdf}>
+              <Download size={21} />
             </button>
           </div>
         </div>
@@ -161,9 +168,10 @@ export const RecipeDetailPage = () => {
             {recipe.memo ? (
               <p className="mt-5 border-l-4 border-[#9a4022] pl-4 text-base italic leading-7 text-[#56423c]">{recipe.memo}</p>
             ) : null}
-            <div className="mt-5 flex gap-2">
+            <div className="no-print mt-5 flex gap-2">
               <Link className="flex-1" to={`/recipes/${recipe.id}/edit`}><Button className="w-full" variant="secondary"><Edit size={17} />수정</Button></Link>
               <Button variant="secondary" onClick={() => setFolderOpen(true)}><BookMarked size={17} />담기</Button>
+              <Button variant="secondary" onClick={exportPdf}><Download size={17} />PDF</Button>
               <Button variant="danger" onClick={() => setConfirmOpen(true)}><Trash2 size={17} /></Button>
             </div>
           </div>
@@ -192,7 +200,7 @@ export const RecipeDetailPage = () => {
         </div>
       </main>
 
-      <div className="pointer-events-none fixed bottom-0 left-0 z-50 flex w-full justify-center p-4">
+      <div className="no-print pointer-events-none fixed bottom-0 left-0 z-50 flex w-full justify-center p-4">
         <button type="button" className="pointer-events-auto inline-flex items-center gap-3 rounded-full bg-[#5b7d54] px-8 py-4 text-sm font-bold text-white shadow-lg active:scale-95" onClick={() => document.getElementById('instructions')?.scrollIntoView({ behavior: 'smooth' })}>
           <PlayCircle size={22} /> START COOKING
         </button>

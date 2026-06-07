@@ -37,3 +37,19 @@
     scrollbar-width: none;
   }
 }
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .recipe-print {
+    background: #ffffff !important;
+    color: #1e1b18 !important;
+    padding-bottom: 0 !important;
+  }
+}

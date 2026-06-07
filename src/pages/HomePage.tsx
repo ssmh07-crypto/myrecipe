@@ -41,7 +41,11 @@ export const HomePage = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!user) return
+      if (!user) {
+        setRecipes([])
+        setLoading(false)
+        return
+      }
       setLoading(true)
       const { data, error: nextError } = await supabase.from('recipes').select('*').order('created_at', { ascending: false }).limit(8)
       setLoading(false)
@@ -78,7 +82,7 @@ export const HomePage = () => {
             <h2 className="font-serif text-2xl font-semibold text-white">Import from anywhere</h2>
             <p className="text-sm leading-6 text-white/90">링크 하나만 붙여넣으면 광고와 긴 글을 걷어내고 주방에서 바로 쓰기 좋은 레시피 초안을 만듭니다.</p>
           </div>
-          <Link to="/recipes/import">
+          <Link to={user ? '/recipes/import' : '/login'}>
             <Button variant="secondary" className="bg-white text-[#9a4022]">
               <Link2 size={18} /> Import via Link
             </Button>
@@ -111,9 +115,9 @@ export const HomePage = () => {
         {loading ? <LoadingState /> : null}
         {!loading && !recipes.length ? (
           <EmptyState
-            title="아직 저장된 레시피가 없습니다."
-            description="직접 작성하거나 링크로 첫 레시피를 가져와 보세요."
-            action={<Link to="/recipes/new"><Button><BookOpen size={17} /> 첫 레시피 작성</Button></Link>}
+            title={user ? '아직 저장된 레시피가 없습니다.' : '비회원으로 둘러보는 중입니다.'}
+            description={user ? '직접 작성하거나 링크로 첫 레시피를 가져와 보세요.' : '레시피 저장, 링크 가져오기, 레시피북 기능은 로그인 후 사용할 수 있습니다.'}
+            action={<Link to={user ? '/recipes/new' : '/login'}><Button><BookOpen size={17} /> {user ? '첫 레시피 작성' : '로그인하기'}</Button></Link>}
           />
         ) : null}
         <div className="no-scrollbar -mx-5 flex gap-4 overflow-x-auto px-5 pb-2">

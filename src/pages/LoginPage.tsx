@@ -1,7 +1,7 @@
 import { ChefHat } from 'lucide-react'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
 import { Button } from '../components/ui/Button'
 import { ErrorState } from '../components/ui/State'
@@ -10,7 +10,6 @@ import { supabase } from '../lib/supabaseClient'
 
 export const LoginPage = () => {
   const { user, isConfigured } = useAuth()
-  const location = useLocation()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [displayName, setDisplayName] = useState('')
@@ -19,9 +18,8 @@ export const LoginPage = () => {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
-  const from = (location.state as { from?: string } | null)?.from || '/recipes'
 
-  if (user) return <Navigate to={from} replace />
+  if (user) return <Navigate to="/recipes" replace />
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -53,6 +51,10 @@ export const LoginPage = () => {
       return
     }
     if (mode === 'signup' && result.data.session) {
+      navigate('/recipes', { replace: true })
+      return
+    }
+    if (mode === 'login') {
       navigate('/recipes', { replace: true })
       return
     }
@@ -97,6 +99,9 @@ export const LoginPage = () => {
           {error ? <ErrorState message={error} /> : null}
           {notice ? <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p> : null}
           <Button className="w-full" disabled={loading}>{mode === 'login' ? '로그인' : '회원가입'}</Button>
+          <Button type="button" variant="secondary" className="w-full" onClick={() => navigate('/recipes')}>
+            비회원으로 진행
+          </Button>
         </form>
       </section>
     </AppLayout>
