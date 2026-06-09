@@ -1,12 +1,13 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen, Link2, Search, Sparkles, Users } from 'lucide-react'
+import { BookOpen, FolderOpen, Link2, Plus, Sparkles, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
+import { ensureRecipeFolders } from '../lib/recipeFolders'
 import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
-import type { Recipe } from '../types/recipe'
+import type { Recipe, RecipeFolder } from '../types/recipe'
 
 const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
   <Link to={`/recipes/${recipe.id}`} className="block min-w-[280px] overflow-hidden rounded-xl bg-[#e4e2dd] shadow-sm">
@@ -31,10 +32,24 @@ const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
   </Link>
 )
 
+const FolderTile = ({ folder, count }: { folder: RecipeFolder; count: number }) => (
+  <Link to="/recipe-books" className="flex min-h-24 items-center gap-4 rounded-xl bg-white p-4 shadow-sm transition active:scale-[0.98]">
+    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#ffdbd0] text-[#9a4022]">
+      <FolderOpen size={24} />
+    </span>
+    <div className="min-w-0 flex-1">
+      <h3 className="truncate text-lg font-bold text-[#1e1b18]">{folder.name}</h3>
+      <p className="mt-1 text-sm font-semibold text-[#89726b]">{count} recipes</p>
+    </div>
+  </Link>
+)
+
 export const HomePage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [folders, setFolders] = useState<RecipeFolder[]>([])
+  const [folderItems, setFolderItems] = useState<{ folder_id: string; recipe_id: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const displayName = (user?.user_metadata?.display_name as string | undefined) || 'Chef'
@@ -43,14 +58,32 @@ export const HomePage = () => {
     const load = async () => {
       if (!user) {
         setRecipes([])
+        setFolders([])
+        setFolderItems([])
         setLoading(false)
         return
       }
       setLoading(true)
-      const { data, error: nextError } = await supabase.from('recipes').select('*').order('created_at', { ascending: false }).limit(8)
-      setLoading(false)
-      if (nextError) setError(nextError.message)
-      else setRecipes((data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
+      setError('')
+      try {
+        const nextFolders = await ensureRecipeFolders(user.id)
+        const [recipeResult, itemResult] = await Promise.all([
+          supabase.from('recipes').select('*').order('created_at', { ascending: false }).limit(8),
+          supabase.from('recipe_folder_items').select('folder_id, recipe_id'),
+        ])
+
+        if (recipeResult.error || itemResult.error) {
+          throw new Error(recipeResult.error?.message || itemResult.error?.message || '홈을 불러오지 못했습니다.')
+        }
+
+        setFolders(nextFolders)
+        setFolderItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
+        setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : '홈을 불러오지 못했습니다.')
+      } finally {
+        setLoading(false)
+      }
     }
     void load()
   }, [user])
@@ -76,6 +109,12 @@ export const HomePage = () => {
     }),
     [recipes],
   )
+
+  const folderCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    folderItems.forEach((item) => map.set(item.folder_id, (map.get(item.folder_id) || 0) + 1))
+    return map
+  }, [folderItems])
 
   return (
     <section className="relative -mx-4 min-h-[calc(100svh-140px)] space-y-8 px-5 pb-20 pt-2">
@@ -138,13 +177,35 @@ export const HomePage = () => {
         </div>
       </section>
 
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-serif text-2xl font-semibold text-[#1e1b18]">My Feed</h2>
+          <Link to="/recipe-books" className="text-sm font-semibold text-[#9a4022]">View All</Link>
+        </div>
+
+        {!loading && user ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {folders.map((folder) => (
+              <FolderTile key={folder.id} folder={folder} count={folderCounts.get(folder.id) || 0} />
+            ))}
+          </div>
+        ) : null}
+        {!loading && !user ? (
+          <EmptyState
+            title="로그인 후 카테고리를 사용할 수 있습니다."
+            description="Chicken, MEAT, FISH, PASTA 기본 카테고리는 로그인 후 자동으로 만들어집니다."
+            action={<Link to="/login"><Button>로그인하기</Button></Link>}
+          />
+        ) : null}
+      </section>
+
       <button
         type="button"
-        aria-label="검색"
+        aria-label="레시피 추가"
         className="fixed bottom-24 right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-[#9a4022] text-white shadow-xl active:scale-95 md:hidden"
-        onClick={() => navigate('/recipes/search')}
+        onClick={() => navigate(user ? '/recipes/add' : '/login')}
       >
-        <Search size={24} />
+        <Plus size={27} />
       </button>
     </section>
   )

@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
+import { ensureRecipeFolders } from '../lib/recipeFolders'
 import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
@@ -68,21 +69,25 @@ export const RecipeBookPage = () => {
   const load = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    const [folderResult, itemResult, recipeResult] = await Promise.all([
-      supabase.from('recipe_folders').select('*').order('created_at', { ascending: false }),
-      supabase.from('recipe_folder_items').select('folder_id, recipe_id'),
-      supabase.from('recipes').select('*').order('created_at', { ascending: false }),
-    ])
-    setLoading(false)
-    if (folderResult.error || itemResult.error || recipeResult.error) {
-      setError(folderResult.error?.message || itemResult.error?.message || recipeResult.error?.message || '레시피북을 불러오지 못했습니다.')
-      return
+    setError('')
+    try {
+      const nextFolders = await ensureRecipeFolders(user.id)
+      const [itemResult, recipeResult] = await Promise.all([
+        supabase.from('recipe_folder_items').select('folder_id, recipe_id'),
+        supabase.from('recipes').select('*').order('created_at', { ascending: false }),
+      ])
+      if (itemResult.error || recipeResult.error) {
+        throw new Error(itemResult.error?.message || recipeResult.error?.message || '레시피북을 불러오지 못했습니다.')
+      }
+      setFolders(nextFolders)
+      setItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
+      setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
+      if (!selectedFolderId && nextFolders[0]) setSelectedFolderId(nextFolders[0].id)
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : '레시피북을 불러오지 못했습니다.')
+    } finally {
+      setLoading(false)
     }
-    const nextFolders = (folderResult.data || []) as RecipeFolder[]
-    setFolders(nextFolders)
-    setItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
-    setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
-    if (!selectedFolderId && nextFolders[0]) setSelectedFolderId(nextFolders[0].id)
   }, [selectedFolderId, user])
 
   useEffect(() => {

@@ -10,6 +10,21 @@ create table if not exists public.profiles (
 alter table public.profiles
 add column if not exists display_name text;
 
+alter table public.profiles add column if not exists plan text default 'free';
+alter table public.profiles add column if not exists premium_started_at timestamptz;
+alter table public.profiles add column if not exists premium_expires_at timestamptz;
+
+update public.profiles
+set plan = 'free'
+where plan is null or plan = '';
+
+alter table public.profiles
+drop constraint if exists profiles_plan_check;
+
+alter table public.profiles
+add constraint profiles_plan_check
+check (plan in ('free', 'premium'));
+
 create table if not exists public.recipes (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) not null,
@@ -177,6 +192,11 @@ drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own"
 on public.profiles for select
 using (auth.uid() = id);
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own"
+on public.profiles for insert
+with check (auth.uid() = id);
 
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own"

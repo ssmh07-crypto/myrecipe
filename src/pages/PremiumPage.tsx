@@ -1,6 +1,10 @@
 import { CheckCircle, Copy, Crown, Sparkles, TableProperties, Wand2, XCircle } from 'lucide-react'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
+import { useAuth } from '../hooks/useAuth'
+import { usePremiumAccess } from '../hooks/usePremiumAccess'
+import { supabase } from '../lib/supabaseClient'
 
 const howItWorks = [
   { icon: Copy, title: 'Copy link', description: '저장 권한이 있는 웹 레시피 링크를 복사합니다.' },
@@ -12,15 +16,50 @@ const proFeatures = ['웹 레시피 링크 정리', '저장 전 초안 편집', 
 const freeFeatures = ['직접 레시피 저장', '레시피북 폴더', '사진 업로드']
 
 export const PremiumPage = () => {
+  const { user } = useAuth()
+  const { hasImportAccess, refresh } = usePremiumAccess()
+  const navigate = useNavigate()
   const [isYearly, setIsYearly] = useState(true)
   const [notice, setNotice] = useState('')
+  const [processing, setProcessing] = useState(false)
 
   const price = isYearly ? '7.99' : '9.99'
   const period = isYearly ? '/month (yearly)' : '/month'
 
-  const handleSubscribe = () => {
-    setNotice('결제 연동은 준비 중입니다. 지금은 프리미엄 안내 화면만 제공됩니다.')
-    window.setTimeout(() => setNotice(''), 3500)
+  const handleSubscribe = async () => {
+    if (!user) {
+      navigate('/login')
+      return
+    }
+
+    setProcessing(true)
+    setNotice('')
+
+    const expiresAt = new Date()
+    expiresAt.setFullYear(expiresAt.getFullYear() + (isYearly ? 1 : 0))
+    if (!isYearly) expiresAt.setMonth(expiresAt.getMonth() + 1)
+
+    const { error } = await supabase
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        email: user.email,
+        plan: 'premium',
+        premium_started_at: new Date().toISOString(),
+        premium_expires_at: expiresAt.toISOString(),
+      })
+
+    setProcessing(false)
+
+    if (error) {
+      setNotice(error.message)
+      window.setTimeout(() => setNotice(''), 4500)
+      return
+    }
+
+    await refresh()
+    setNotice('결제가 완료되어 링크로 가져오기 기능이 열렸습니다.')
+    window.setTimeout(() => navigate('/recipes/import'), 900)
   }
 
   return (
@@ -94,8 +133,8 @@ export const PremiumPage = () => {
                 </li>
               ))}
             </ul>
-            <button type="button" className="mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#f4b400] px-4 py-3 text-sm font-bold text-[#390b00] shadow-lg active:scale-95" onClick={handleSubscribe}>
-              <Sparkles size={18} /> Get Premium
+            <button type="button" className="mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#f4b400] px-4 py-3 text-sm font-bold text-[#390b00] shadow-lg active:scale-95 disabled:cursor-not-allowed disabled:opacity-60" onClick={handleSubscribe} disabled={processing || hasImportAccess}>
+              <Sparkles size={18} /> {hasImportAccess ? 'Premium Active' : processing ? 'Processing...' : 'Get Premium'}
             </button>
           </div>
         </div>
