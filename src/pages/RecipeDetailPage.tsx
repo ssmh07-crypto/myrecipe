@@ -1,6 +1,5 @@
-import { ArrowLeft, BookMarked, Download, Edit, ExternalLink, Heart, Signal, StickyNote, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookMarked, Download, Edit, ExternalLink, MoreHorizontal, Plus, Signal, Trash2, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import type { ButtonHTMLAttributes } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -19,23 +18,6 @@ const splitSteps = (stepsText: string) =>
 
 const glassButton = 'grid h-11 w-11 place-items-center rounded-full bg-black/30 text-white shadow-sm backdrop-blur-md transition active:scale-95'
 
-const ActionButton = ({
-  children,
-  className = '',
-  tone = 'neutral',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'neutral' | 'danger' }) => (
-  <button
-    type="button"
-    className={`inline-flex min-h-10 items-center justify-center gap-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition active:scale-95 ${
-      tone === 'danger' ? 'bg-[#ffdad6] text-[#93000a]' : 'bg-[#f0eded] text-[#1b1c1c] hover:bg-[#e4e2e1]'
-    } ${className}`}
-    {...props}
-  >
-    {children}
-  </button>
-)
-
 const ListSection = ({ title, items }: { title: string; items: string[] }) => (
   <section>
     <h2 className="mb-4 text-[22px] font-semibold leading-7 text-[#1b1c1c]">{title}</h2>
@@ -49,6 +31,26 @@ const ListSection = ({ title, items }: { title: string; items: string[] }) => (
   </section>
 )
 
+const SeasoningSection = ({ items }: { items: Recipe['seasonings'] }) => (
+  <section>
+    <h2 className="mb-4 text-[22px] font-semibold leading-7 text-[#1b1c1c]">Seasonings</h2>
+    <ul className="space-y-2">
+      {items.length ? items.map((item, index) => {
+        const amount = [item.amount, item.unit].filter(Boolean).join(' ')
+        return (
+          <li key={`${item.name}-${index}`} className="flex items-center justify-between gap-4 rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-base leading-6 text-[#1b1c1c]">
+            <span>{item.name}</span>
+            {amount ? <span className="shrink-0 text-sm font-semibold text-[#564338]">{amount}</span> : null}
+          </li>
+        )
+      }) : <li className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">작성된 항목이 없습니다.</li>}
+    </ul>
+  </section>
+)
+
+const formatUpdatedDate = (value: string) =>
+  new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+
 export const RecipeDetailPage = () => {
   const { id } = useParams()
   const { user } = useAuth()
@@ -60,6 +62,7 @@ export const RecipeDetailPage = () => {
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [folderOpen, setFolderOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -93,13 +96,6 @@ export const RecipeDetailPage = () => {
     navigate('/recipes')
   }
 
-  const toggleFavorite = async () => {
-    if (!recipe) return
-    const next = !recipe.is_favorite
-    setRecipe({ ...recipe, is_favorite: next })
-    await supabase.from('recipes').update({ is_favorite: next }).eq('id', recipe.id)
-  }
-
   const toggleFolder = async (folderId: string) => {
     if (!recipe || !user) return
     const exists = selectedFolderIds.includes(folderId)
@@ -121,15 +117,14 @@ export const RecipeDetailPage = () => {
   if (!recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message="레시피를 찾을 수 없습니다." /></main>
 
   const ingredients = recipe.ingredients.map((item) => formatIngredientItems([item]))
-  const seasonings = recipe.seasonings.map((item) => formatIngredientItems([item]))
 
   return (
     <article className="recipe-print mx-auto min-h-screen max-w-md bg-[#fbf9f8] pb-32 text-[#1b1c1c]">
-      <header className="relative h-[360px] w-full overflow-hidden">
+      <header className="relative h-[400px] w-full overflow-hidden">
         {recipe.image_url ? (
-          <img src={recipe.image_url} alt="" className="h-full w-full object-cover [mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)]" />
+          <img src={recipe.image_url} alt="" className="h-full w-full object-cover [mask-image:linear-gradient(to_bottom,black_85%,transparent_100%)]" />
         ) : (
-          <div className="grid h-full w-full place-items-center bg-[#e4e2e1] text-[#5c5c5c] [mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)]">
+          <div className="grid h-full w-full place-items-center bg-[#e4e2e1] text-[#5c5c5c] [mask-image:linear-gradient(to_bottom,black_85%,transparent_100%)]">
             <BookMarked size={72} />
           </div>
         )}
@@ -137,37 +132,44 @@ export const RecipeDetailPage = () => {
           <button type="button" aria-label="뒤로" className={glassButton} onClick={() => navigate(-1)}>
             <ArrowLeft size={22} />
           </button>
-          <button type="button" aria-label="즐겨찾기" className={glassButton} onClick={toggleFavorite}>
-            <Heart size={22} className={recipe.is_favorite ? 'fill-red-500 text-red-500' : ''} />
-          </button>
+          <div className="relative">
+            <button type="button" aria-label="더 보기" className={glassButton} onClick={() => setMoreOpen((value) => !value)}>
+              <MoreHorizontal size={23} />
+            </button>
+            {moreOpen ? (
+              <div className="absolute right-0 mt-1 w-48 overflow-hidden rounded-lg border border-[#ddc1b3] bg-white py-1 shadow-xl">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-[#1b1c1c] hover:bg-[#e4e2e1]"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    exportPdf()
+                  }}
+                >
+                  <Download size={18} />
+                  Download PDF
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-[#93000a] hover:bg-[#ffdad6]/40"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    setConfirmOpen(true)
+                  }}
+                >
+                  <Trash2 size={18} />
+                  Delete
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
-      <main className="relative z-20 -mt-12 px-4">
+      <main className="relative z-20 -mt-16 px-4">
         <section className="rounded-xl border border-[#e4e2e1]/60 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <h1 className="flex-1 text-[28px] font-bold leading-[34px] text-[#1b1c1c]">{recipe.title}</h1>
-          </div>
-
-          <div className="no-print mb-4 flex flex-wrap gap-1 border-b border-[#e4e2e1]/60 pb-4">
-            <Link to={`/recipes/${recipe.id}/edit`} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg bg-[#f0eded] px-3 py-2 text-[13px] font-semibold text-[#1b1c1c] transition active:scale-95">
-              <Edit size={18} />
-              Edit
-            </Link>
-            <ActionButton onClick={() => setFolderOpen(true)}>
-              <BookMarked size={18} />
-              Category
-            </ActionButton>
-            <ActionButton onClick={exportPdf}>
-              <Download size={18} />
-              PDF
-            </ActionButton>
-            <ActionButton tone="danger" className="ml-auto" aria-label="레시피 삭제" onClick={() => setConfirmOpen(true)}>
-              <Trash2 size={18} />
-            </ActionButton>
-          </div>
-
-          <div className="mb-4 flex flex-wrap items-center gap-4 text-[#564338]">
+          <h1 className="mb-2 text-[28px] font-bold leading-[34px] text-[#1b1c1c]">{recipe.title}</h1>
+          <div className="flex flex-wrap items-center gap-4 text-[#564338]">
             <span className="inline-flex items-center gap-1 text-sm font-semibold">
               <Users size={18} className="text-[#5c5c5c]" />
               {recipe.servings || 0} Servings
@@ -177,21 +179,23 @@ export const RecipeDetailPage = () => {
               {recipe.difficulty || 'Difficulty'}
             </span>
           </div>
-
-          {recipe.memo ? (
-            <div className="rounded-lg border-l-4 border-[#5c5c5c] bg-[#f6f3f2] p-4 text-[15px] leading-6 text-[#564338]">
-              <div className="mb-1 flex items-center gap-1">
-                <StickyNote size={18} />
-                <span className="text-sm font-semibold uppercase tracking-wider opacity-70">Chef's Notes</span>
-              </div>
-              {recipe.memo}
-            </div>
-          ) : null}
         </section>
 
         <div className="space-y-8 py-8">
+          {recipe.memo ? (
+            <section>
+              <h2 className="mb-4 text-[22px] font-semibold leading-7 text-[#1b1c1c]">Chef's Notes</h2>
+              <div className="rounded-xl border-l-4 border-[#5c5c5c] bg-[#f6f3f2] p-4 text-base leading-7 text-[#564338]">
+                {recipe.memo}
+                <div className="mt-2 text-xs font-medium leading-4 text-[#8a7266] opacity-80">
+                  Last updated: {formatUpdatedDate(recipe.updated_at)}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <ListSection title="Ingredients" items={ingredients} />
-          <ListSection title="Seasonings" items={seasonings} />
+          <SeasoningSection items={recipe.seasonings} />
 
           <section id="instructions">
             <h2 className="mb-4 text-[22px] font-semibold leading-7 text-[#1b1c1c]">Instructions</h2>
@@ -227,10 +231,18 @@ export const RecipeDetailPage = () => {
 
       <div className="no-print pointer-events-none fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-[#fbf9f8] via-[#fbf9f8]/90 to-transparent p-4">
         <div className="mx-auto flex max-w-md gap-4">
-          <Link to={`/recipes/${recipe.id}/edit`} className="pointer-events-auto flex h-14 flex-1 items-center justify-center gap-2 rounded-xl bg-[#5c5c5c] text-sm font-semibold text-white shadow-lg transition active:scale-95">
-            <Edit size={23} />
+          <Link to={`/recipes/${recipe.id}/edit`} className="pointer-events-auto flex h-14 flex-1 items-center justify-center gap-2 rounded-full bg-[#1b1c1c] text-sm font-semibold text-[#fbf9f8] shadow-xl transition active:scale-95">
+            <Edit size={22} />
             Edit Recipe
           </Link>
+          <button
+            type="button"
+            className="pointer-events-auto flex h-14 flex-1 items-center justify-center gap-2 rounded-full border border-[#ddc1b3] bg-white text-sm font-semibold text-[#1b1c1c] shadow-sm transition active:scale-95"
+            onClick={() => setFolderOpen(true)}
+          >
+            <Plus size={22} />
+            Add Recipe
+          </button>
         </div>
       </div>
 
