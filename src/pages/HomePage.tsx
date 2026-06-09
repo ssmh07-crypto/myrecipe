@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen, FolderOpen, Link2, Plus, Sparkles, Users } from 'lucide-react'
+import { FolderOpen, Plus, Search, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
@@ -10,22 +10,23 @@ import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
 
 const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
-  <Link to={`/recipes/${recipe.id}`} className="block min-w-[280px] overflow-hidden rounded-xl bg-[#e4e2dd] shadow-sm">
-    <div className="h-44 overflow-hidden bg-[#f5ece7]">
+  <Link to={`/recipes/${recipe.id}`} className="group block w-64 shrink-0 overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
+    <div className="aspect-[3/2] w-full overflow-hidden bg-[#e4e2e1]">
       {recipe.image_url ? (
-        <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition-transform duration-500 hover:scale-105" />
+        <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
       ) : (
-        <div className="grid h-full place-items-center text-5xl">🍚</div>
+        <div className="grid h-full place-items-center bg-[#ffdbc9] text-5xl">🍚</div>
       )}
     </div>
     <div className="space-y-2 p-4">
-      <h3 className="line-clamp-1 font-serif text-2xl font-semibold text-[#1e1b18]">{recipe.title}</h3>
-      <div className="flex items-center justify-between text-xs font-semibold text-[#56423c]">
+      <h3 className="truncate text-sm font-semibold text-[#1b1c1c]">{recipe.title}</h3>
+      <div className="flex items-center gap-2 text-xs font-medium text-[#564338]">
         <span className={recipe.source_type === 'imported' ? 'text-sky-700' : 'text-emerald-700'}>
-          {recipe.source_type === 'imported' ? '가져온 레시피' : '내가 만든 레시피'}
+          {recipe.source_type === 'imported' ? 'Imported' : 'My Recipe'}
         </span>
-        <span className="inline-flex items-center gap-1">
-          <Users size={14} /> {recipe.servings || 0}인분
+        <span>·</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <Users size={14} /> {recipe.servings || 0} servings
         </span>
       </div>
     </div>
@@ -33,13 +34,24 @@ const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
 )
 
 const FolderTile = ({ folder, count }: { folder: RecipeFolder; count: number }) => (
-  <Link to="/recipe-books" className="flex min-h-24 items-center gap-4 rounded-xl bg-white p-4 shadow-sm transition active:scale-[0.98]">
-    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#ffdbd0] text-[#9a4022]">
-      <FolderOpen size={24} />
-    </span>
-    <div className="min-w-0 flex-1">
-      <h3 className="truncate text-lg font-bold text-[#1e1b18]">{folder.name}</h3>
-      <p className="mt-1 text-sm font-semibold text-[#89726b]">{count} recipes</p>
+  <Link to="/recipe-books" className="group overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
+    <div className="relative h-32 overflow-hidden bg-[#ffdbc9]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,#c8f17a_0,transparent_34%),linear-gradient(135deg,#ffdbc9,#f6f3f2)]" />
+      <div className="absolute left-4 top-4 rounded-full bg-[#974400] px-3 py-1 text-xs font-semibold text-white">
+        Category
+      </div>
+      <div className="absolute bottom-4 right-4 grid h-14 w-14 place-items-center rounded-full bg-white/85 text-[#974400] shadow-sm backdrop-blur">
+        <FolderOpen size={28} />
+      </div>
+    </div>
+    <div className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{folder.name}</h3>
+        <span className="rounded-lg bg-[#c8f17a] px-2 py-1 text-xs font-semibold text-[#4e6e00]">
+          {count}
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-[#564338]">{count} saved recipes</p>
     </div>
   </Link>
 )
@@ -101,15 +113,6 @@ export const HomePage = () => {
     return () => window.cancelIdleCallback?.(idleId)
   }, [])
 
-  const counts = useMemo(
-    () => ({
-      total: recipes.length,
-      imported: recipes.filter((recipe) => recipe.source_type === 'imported').length,
-      manual: recipes.filter((recipe) => recipe.source_type === 'manual').length,
-    }),
-    [recipes],
-  )
-
   const folderCounts = useMemo(() => {
     const map = new Map<string, number>()
     folderItems.forEach((item) => map.set(item.folder_id, (map.get(item.folder_id) || 0) + 1))
@@ -117,50 +120,25 @@ export const HomePage = () => {
   }, [folderItems])
 
   return (
-    <section className="relative -mx-4 min-h-[calc(100svh-140px)] space-y-8 px-5 pb-20 pt-2">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-[#56423c]">Welcome back, {displayName}</p>
-        <h1 className="font-serif text-[28px] font-bold leading-9 text-[#1e1b18]">오늘은 어떤 레시피를 저장할까요?</h1>
+    <section className="relative mx-auto min-h-[calc(100svh-140px)] max-w-xl space-y-8 pb-20">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-[#564338]">Welcome back, {displayName}</p>
+        <h1 className="text-[28px] font-bold leading-[34px] text-[#1b1c1c]">My Recipe Note</h1>
       </div>
 
-      <div className="relative overflow-hidden rounded-xl bg-[#b95837] p-6 shadow-lg">
-        <div className="absolute -right-16 -top-16 h-32 w-32 rounded-full bg-[#390b00]/10" />
-        <div className="relative z-10 space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-white">
-              <Sparkles size={19} className="fill-white" />
-              <span className="text-xs font-bold uppercase tracking-wider">Recipe Import</span>
-            </div>
-            <h2 className="font-serif text-2xl font-semibold text-white">Import from anywhere</h2>
-            <p className="text-sm leading-6 text-white/90">권한이 있는 웹 레시피 링크를 붙여넣으면 주방에서 바로 쓰기 좋은 개인 레시피 초안으로 정리합니다.</p>
-          </div>
-          <Link to="/recipes/import">
-            <Button variant="secondary" className="bg-white text-[#9a4022]">
-              <Link2 size={18} /> Import via Link
-            </Button>
-          </Link>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-4 rounded-xl bg-[#e4e2e1] px-4 text-left text-base text-[#564338] transition focus:outline-none focus:ring-2 focus:ring-[#974400]"
+        onClick={() => navigate('/recipes/search')}
+      >
+        <Search size={22} className="text-[#8a7266]" />
+        <span>Search your recipes...</span>
+      </button>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold text-[#89726b]">Total</p>
-          <p className="mt-1 text-2xl font-bold text-[#1e1b18]">{counts.total}</p>
-        </div>
-        <div className="rounded-xl bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold text-[#89726b]">Manual</p>
-          <p className="mt-1 text-2xl font-bold text-[#1e1b18]">{counts.manual}</p>
-        </div>
-        <div className="rounded-xl bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold text-[#89726b]">Imported</p>
-          <p className="mt-1 text-2xl font-bold text-[#1e1b18]">{counts.imported}</p>
-        </div>
-      </div>
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-serif text-2xl font-semibold text-[#1e1b18]">Recent Recipes</h2>
-          <Link to="/recipes/recent" className="text-sm font-semibold text-[#9a4022]">View All</Link>
+      <section>
+        <div className="mb-4 flex items-end justify-between">
+          <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">Recent Recipes</h2>
+          <Link to="/recipes/recent" className="text-sm font-semibold text-[#974400]">View all</Link>
         </div>
 
         {error ? <ErrorState message={error} /> : null}
@@ -169,22 +147,22 @@ export const HomePage = () => {
           <EmptyState
             title={user ? '아직 저장된 레시피가 없습니다.' : '비회원으로 둘러보는 중입니다.'}
             description={user ? '직접 작성하거나 링크로 첫 레시피를 가져와 보세요.' : '레시피 저장, 링크 가져오기, 레시피북 기능은 로그인 후 사용할 수 있습니다.'}
-            action={<Link to={user ? '/recipes/new' : '/login'}><Button><BookOpen size={17} /> {user ? '첫 레시피 작성' : '로그인하기'}</Button></Link>}
+            action={<Link to={user ? '/recipes/add' : '/login'}><Button>{user ? '첫 레시피 추가' : '로그인하기'}</Button></Link>}
           />
         ) : null}
-        <div className="no-scrollbar -mx-5 flex gap-4 overflow-x-auto px-5 pb-2">
+        <div className="no-scrollbar -mx-4 flex gap-4 overflow-x-auto px-4 pb-1">
           {recipes.map((recipe) => <RecentRecipeTile key={recipe.id} recipe={recipe} />)}
         </div>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-serif text-2xl font-semibold text-[#1e1b18]">My Feed</h2>
-          <Link to="/recipe-books" className="text-sm font-semibold text-[#9a4022]">View All</Link>
+      <section className="space-y-4">
+        <div className="flex items-end justify-between">
+          <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">My Feed</h2>
+          <Link to="/recipe-books" className="text-sm font-semibold text-[#974400]">View all</Link>
         </div>
 
         {!loading && user ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4">
             {folders.map((folder) => (
               <FolderTile key={folder.id} folder={folder} count={folderCounts.get(folder.id) || 0} />
             ))}

@@ -30,28 +30,28 @@ export const AppLayout = ({
   if (requireAuth && !user) return <Navigate to="/login" replace />
 
   return (
-    <div className="min-h-screen bg-[#fff8f5] text-stone-900">
-      {!hideHeader ? <header className="no-print sticky top-0 z-20 bg-[#fff8f5]/95 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
+    <div className="min-h-screen bg-[#fbf9f8] text-[#1b1c1c]">
+      {!hideHeader ? <header className="no-print sticky top-0 z-20 bg-[#fbf9f8]/95 shadow-sm backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-xl items-center justify-between px-4">
           <NavLink to="/recipes" className="flex items-center gap-2 font-bold">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-[#ffdbd0] text-[#9a4022]">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#ffdbc9] text-[#974400]">
               <BookOpen size={19} />
             </span>
-            <span className="font-serif text-xl text-[#9a4022]">My Recipe Note</span>
+            <span className="text-[22px] font-bold leading-7 text-[#974400]">My Recipe Note</span>
           </NavLink>
           <NavLink
             to={user ? '/settings' : '/login'}
-            className="inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-[#9a4022] shadow-sm"
+            className="inline-flex min-h-10 items-center gap-2 rounded-full p-2 text-sm font-semibold text-[#974400] transition hover:bg-[#e4e2e1]"
+            aria-label={user ? '설정' : '로그인'}
           >
-            {user ? <Settings size={17} /> : null}
-            {user ? '설정' : 'Log in'}
+            {user ? <Settings size={22} /> : <span className="px-2">Log in</span>}
           </NavLink>
         </div>
       </header> : null}
       <main className={`mx-auto max-w-3xl ${hideHeader ? '' : 'px-4 pt-4'} ${hideNav ? 'pb-8' : 'pb-28'}`}>{children}</main>
       {!hideNav ? (
-        <nav className="no-print fixed bottom-0 left-0 right-0 z-30 rounded-t-xl bg-white shadow-[0_-4px_16px_rgba(154,64,34,0.08)]">
-          <div className="mx-auto grid max-w-3xl grid-cols-5 px-3 py-2">
+        <nav className="no-print fixed bottom-0 left-0 right-0 z-30 rounded-t-xl border-t border-[#ddc1b3] bg-white shadow-[0_-4px_16px_rgba(154,64,34,0.08)]">
+          <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pb-2 pt-1">
             {tabs.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={label}
@@ -59,7 +59,7 @@ export const AppLayout = ({
                 className={() => {
                   const isActive = location.pathname === to
                   return (
-                  `flex flex-col items-center gap-1 rounded-full px-2 py-2 text-xs transition ${isActive ? 'bg-[#ffdbd0] text-[#390b00]' : 'text-[#56423c]'}`
+                  `flex min-h-14 flex-col items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-semibold transition active:scale-90 ${isActive ? 'bg-[#c8f17a] text-[#4e6e00]' : 'text-[#564338]'}`
                   )
                 }}
               >
