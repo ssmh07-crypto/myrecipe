@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from './useAuth'
 import { hasSupabaseEnv, supabase } from '../lib/supabaseClient'
 
@@ -19,7 +19,7 @@ export const usePremiumAccess = () => {
   const [loading, setLoading] = useState(hasSupabaseEnv)
   const [error, setError] = useState('')
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!hasSupabaseEnv || !user) {
       setHasImportAccess(false)
       setLoading(false)
@@ -43,12 +43,15 @@ export const usePremiumAccess = () => {
     }
 
     setLoading(false)
-  }
+  }, [user])
 
   useEffect(() => {
     if (authLoading) return
-    void refresh()
-  }, [authLoading, user?.id])
+    const timer = window.setTimeout(() => {
+      void refresh()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [authLoading, refresh])
 
   return { hasImportAccess, loading: authLoading || loading, error, refresh }
 }

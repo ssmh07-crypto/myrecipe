@@ -1,7 +1,7 @@
 import { Edit, FolderOpen, Heart, Plus, Signal, Trash2, Users, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
@@ -55,6 +55,7 @@ const RecipeBookCard = ({ recipe }: { recipe: Recipe }) => (
 
 export const RecipeBookPage = () => {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
   const [folders, setFolders] = useState<RecipeFolder[]>([])
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [items, setItems] = useState<{ folder_id: string; recipe_id: string }[]>([])
@@ -82,13 +83,20 @@ export const RecipeBookPage = () => {
       setFolders(nextFolders)
       setItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
       setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
-      if (!selectedFolderId && nextFolders[0]) setSelectedFolderId(nextFolders[0].id)
+      const folderParam = searchParams.get('folder')
+      const folderFromQuery = folderParam ? nextFolders.find((folder) => folder.id === folderParam) : null
+      if (folderFromQuery) {
+        setActiveTab('categories')
+        setSelectedFolderId(folderFromQuery.id)
+      } else if (!selectedFolderId && nextFolders[0]) {
+        setSelectedFolderId(nextFolders[0].id)
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '레시피북을 불러오지 못했습니다.')
     } finally {
       setLoading(false)
     }
-  }, [selectedFolderId, user])
+  }, [searchParams, selectedFolderId, user])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

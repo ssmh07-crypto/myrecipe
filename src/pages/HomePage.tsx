@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { FolderOpen, Plus, Search, Users } from 'lucide-react'
+import { BookOpen, Plus, Search, Signal, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
@@ -9,24 +9,50 @@ import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
 
+const folderImages: Record<string, { image: string; label: string }> = {
+  CHICKEN: {
+    image: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&q=80&w=900',
+    label: 'CHICKEN',
+  },
+  MEAT: {
+    image: 'https://images.unsplash.com/photo-1600891964599-f61ba0e24092?auto=format&fit=crop&q=80&w=900',
+    label: 'MEAT',
+  },
+  FISH: {
+    image: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&q=80&w=900',
+    label: 'FISH',
+  },
+  PASTA: {
+    image: 'https://images.unsplash.com/photo-1473093226795-af9932fe5856?auto=format&fit=crop&q=80&w=900',
+    label: 'PASTA',
+  },
+}
+
+const fallbackFolderImage = {
+  image: 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&q=80&w=900',
+  label: 'CATEGORY',
+}
+
 const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
   <Link to={`/recipes/${recipe.id}`} className="group block w-64 shrink-0 overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
     <div className="aspect-[3/2] w-full overflow-hidden bg-[#e4e2e1]">
       {recipe.image_url ? (
         <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
       ) : (
-        <div className="grid h-full place-items-center bg-[#ffdbc9] text-5xl">🍚</div>
+        <div className="grid h-full place-items-center bg-[#ffdbc9] text-[#974400]">
+          <BookOpen size={42} />
+        </div>
       )}
     </div>
     <div className="space-y-2 p-4">
       <h3 className="truncate text-sm font-semibold text-[#1b1c1c]">{recipe.title}</h3>
       <div className="flex items-center gap-2 text-xs font-medium text-[#564338]">
-        <span className={recipe.source_type === 'imported' ? 'text-sky-700' : 'text-emerald-700'}>
-          {recipe.source_type === 'imported' ? 'Imported' : 'My Recipe'}
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <Signal size={14} /> {recipe.difficulty || '난이도 미정'}
         </span>
         <span>·</span>
         <span className="inline-flex items-center gap-1 whitespace-nowrap">
-          <Users size={14} /> {recipe.servings || 0} servings
+          <Users size={14} /> {recipe.servings || 0}인분
         </span>
       </div>
     </div>
@@ -34,24 +60,21 @@ const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
 )
 
 const FolderTile = ({ folder, count }: { folder: RecipeFolder; count: number }) => (
-  <Link to="/recipe-books" className="group overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
-    <div className="relative h-32 overflow-hidden bg-[#ffdbc9]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,#c8f17a_0,transparent_34%),linear-gradient(135deg,#ffdbc9,#f6f3f2)]" />
-      <div className="absolute left-4 top-4 rounded-full bg-[#974400] px-3 py-1 text-xs font-semibold text-white">
-        Category
-      </div>
-      <div className="absolute bottom-4 right-4 grid h-14 w-14 place-items-center rounded-full bg-white/85 text-[#974400] shadow-sm backdrop-blur">
-        <FolderOpen size={28} />
-      </div>
-    </div>
-    <div className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{folder.name}</h3>
-        <span className="rounded-lg bg-[#c8f17a] px-2 py-1 text-xs font-semibold text-[#4e6e00]">
-          {count}
+  <Link to={`/recipe-books?folder=${folder.id}`} className="group block overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
+    <div className="relative h-48 overflow-hidden bg-[#e4e2e1]">
+      <img
+        src={(folderImages[folder.name.trim().toUpperCase()] || fallbackFolderImage).image}
+        alt=""
+        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+      />
+      <div className="absolute inset-0 flex items-center justify-center bg-black/25 px-4">
+        <span className="text-center text-[28px] font-bold leading-[34px] tracking-[0.18em] text-white drop-shadow-sm">
+          {(folderImages[folder.name.trim().toUpperCase()]?.label || folder.name).toUpperCase()}
         </span>
       </div>
-      <p className="mt-2 text-sm text-[#564338]">{count} saved recipes</p>
+      <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-[#4e6e00] shadow-sm backdrop-blur">
+        {count}
+      </span>
     </div>
   </Link>
 )
@@ -64,7 +87,6 @@ export const HomePage = () => {
   const [folderItems, setFolderItems] = useState<{ folder_id: string; recipe_id: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const displayName = (user?.user_metadata?.display_name as string | undefined) || 'Chef'
 
   useEffect(() => {
     const load = async () => {
@@ -121,11 +143,6 @@ export const HomePage = () => {
 
   return (
     <section className="relative mx-auto min-h-[calc(100svh-140px)] max-w-xl space-y-8 pb-20">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold text-[#564338]">Welcome back, {displayName}</p>
-        <h1 className="text-[28px] font-bold leading-[34px] text-[#1b1c1c]">My Recipe Note</h1>
-      </div>
-
       <button
         type="button"
         className="flex min-h-11 w-full items-center gap-4 rounded-xl bg-[#e4e2e1] px-4 text-left text-base text-[#564338] transition focus:outline-none focus:ring-2 focus:ring-[#974400]"
@@ -157,7 +174,7 @@ export const HomePage = () => {
 
       <section className="space-y-4">
         <div className="flex items-end justify-between">
-          <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">My Feed</h2>
+          <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">My Category</h2>
           <Link to="/recipe-books" className="text-sm font-semibold text-[#974400]">View all</Link>
         </div>
 

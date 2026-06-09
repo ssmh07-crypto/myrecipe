@@ -87,6 +87,26 @@ user_id/recipe_id/filename
 
 ## Cloudflare Pages 배포
 
+배포 명령:
+
+```bash
+npm run deploy
+```
+
+이 명령은 로컬에서 `npm run build`를 먼저 실행하고, 성공하면 `main` 브랜치를 GitHub에 push합니다. GitHub 저장소와 연결된 Cloudflare Pages가 push를 감지해 자동 배포합니다.
+
+배포 링크:
+
+```txt
+https://myrecipe-1im.pages.dev
+```
+
+배포 후 확인:
+
+```bash
+npm run deploy:check
+```
+
 빌드 설정:
 
 - Build command: `npm run build`
