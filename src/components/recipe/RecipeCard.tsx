@@ -14,10 +14,10 @@ export const RecipeCard = ({ recipe }: { recipe: Recipe }) => (
           {recipe.is_favorite ? <Heart size={17} className="shrink-0 fill-[#9a4022] text-[#9a4022]" /> : null}
         </div>
         <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${recipe.source_type === 'imported' ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'}`}>
-          {recipe.source_type === 'imported' ? '가져온 레시피' : '내가 만든 레시피'}
+          {recipe.source_type === 'imported' ? 'Imported' : 'Manual'}
         </span>
         <div className="mt-3 flex items-center gap-3 text-xs text-stone-500">
-          <span className="inline-flex items-center gap-1"><Users size={14} />{recipe.servings || 0}인분</span>
+          <span className="inline-flex items-center gap-1"><Users size={14} />{recipe.servings || 0} servings</span>
           <span className="inline-flex items-center gap-1"><Signal size={14} />{recipe.difficulty}</span>
         </div>
       </div>

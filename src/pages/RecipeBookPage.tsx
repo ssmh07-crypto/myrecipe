@@ -1,10 +1,11 @@
 import { ArrowLeft, CakeSlice, CalendarDays, Edit, FolderPlus, Heart, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
+import { getFolderImage } from '../lib/folderImages'
 import { ensureRecipeFolders } from '../lib/recipeFolders'
 import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
@@ -70,7 +71,7 @@ const RecipeSearchRow = ({ recipe }: { recipe: Recipe }) => (
         </div>
       ) : null}
     </div>
-    <div className="flex flex-col justify-center gap-2">
+    <div className="flex flex-col justify-center gap-2 rounded-xl bg-white p-4 shadow-[0_4px_12px_rgba(0,0,0,0.04)] md:flex-1">
       <div className="flex items-center gap-2">
         <span className="rounded-md bg-[#eeeeee] px-2 py-0.5 text-xs font-medium text-[#4c4546]">{sourceLabel(recipe)}</span>
         <div className="flex items-center gap-1 text-[#4c4546]">
@@ -93,6 +94,7 @@ const RecipeSearchRow = ({ recipe }: { recipe: Recipe }) => (
 )
 
 const CategoryCard = ({
+  folder,
   title,
   count,
   active,
@@ -101,6 +103,7 @@ const CategoryCard = ({
   onEdit,
   onDelete,
 }: {
+  folder?: RecipeFolder
   title: string
   count: number
   active: boolean
@@ -111,6 +114,7 @@ const CategoryCard = ({
 }) => {
   const style = folderIconStyles[iconIndex % folderIconStyles.length]
   const Icon = style.icon
+  const folderImage = folder ? getFolderImage(folder) : null
 
   return (
     <div
@@ -123,9 +127,16 @@ const CategoryCard = ({
       }}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className={`grid h-10 w-10 place-items-center rounded-lg ${style.bg} ${style.color} transition group-hover:scale-110`}>
-          <Icon size={21} fill={Icon === Heart ? 'currentColor' : 'none'} />
-        </div>
+        {folderImage ? (
+          <div className="relative h-16 w-16 overflow-hidden rounded-lg bg-[#e4e2e1]">
+            <img src={folderImage.image} alt="" className="h-full w-full object-cover transition group-hover:scale-110" />
+            <div className="absolute inset-0 bg-black/10" />
+          </div>
+        ) : (
+          <div className={`grid h-10 w-10 place-items-center rounded-lg ${style.bg} ${style.color} transition group-hover:scale-110`}>
+            <Icon size={21} fill={Icon === Heart ? 'currentColor' : 'none'} />
+          </div>
+        )}
         {onEdit || onDelete ? (
           <div className="flex gap-1">
             {onEdit ? (
@@ -160,10 +171,14 @@ export const RecipeBookPage = () => {
   const [query, setQuery] = useState('')
   const [showAllCategories, setShowAllCategories] = useState(false)
   const [name, setName] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
   const [editingId, setEditingId] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const bookSearchRef = useRef<HTMLInputElement | null>(null)
+  const scopedSearchRef = useRef<HTMLInputElement | null>(null)
+  const firstResultRef = useRef<HTMLAnchorElement | null>(null)
 
   const load = useCallback(async () => {
     if (!user) return
@@ -233,12 +248,14 @@ export const RecipeBookPage = () => {
   const openCreateModal = () => {
     setEditingId('')
     setName('')
+    setImageUrl('')
     setModalOpen(true)
   }
 
   const openEditModal = (folder: RecipeFolder) => {
     setEditingId(folder.id)
     setName(folder.name)
+    setImageUrl(folder.image_url || '')
     setModalOpen(true)
   }
 
@@ -246,9 +263,21 @@ export const RecipeBookPage = () => {
     event.preventDefault()
     if (!user || !name.trim()) return
     setError('')
-    const result = editingId
-      ? await supabase.from('recipe_folders').update({ name: name.trim() }).eq('id', editingId)
-      : await supabase.from('recipe_folders').insert({ name: name.trim(), user_id: user.id }).select('id').single()
+    const payload = { name: name.trim(), image_url: imageUrl.trim() || null }
+    let notice = ''
+    let result = editingId
+      ? await supabase.from('recipe_folders').update(payload).eq('id', editingId)
+      : await supabase.from('recipe_folders').insert({ ...payload, user_id: user.id }).select('id').single()
+
+    if (result.error && result.error.message.toLowerCase().includes('image_url')) {
+      result = editingId
+        ? await supabase.from('recipe_folders').update({ name: payload.name }).eq('id', editingId)
+        : await supabase.from('recipe_folders').insert({ name: payload.name, user_id: user.id }).select('id').single()
+      if (!result.error) {
+        notice = 'Category saved without image. Run supabase/schema.sql to enable category images.'
+      }
+    }
+
     if (result.error) {
       setError(result.error.message)
       return
@@ -258,9 +287,11 @@ export const RecipeBookPage = () => {
       setActiveFilter('folder')
     }
     setName('')
+    setImageUrl('')
     setEditingId('')
     setModalOpen(false)
     await load()
+    if (notice) setError(notice)
   }
 
   const deleteFolder = async (folderId: string) => {
@@ -285,6 +316,16 @@ export const RecipeBookPage = () => {
     : activeFilter === 'folder'
       ? folders.find((folder) => folder.id === selectedFolderId)?.name || 'Category Recipes'
       : 'All Recipes'
+  const editingFolder = folders.find((folder) => folder.id === editingId)
+  const folderPreviewImage = imageUrl || (editingFolder ? getFolderImage(editingFolder).image : '')
+
+  const submitSearch = (input: HTMLInputElement | null) => {
+    input?.blur()
+    window.setTimeout(() => {
+      firstResultRef.current?.focus()
+      firstResultRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 0)
+  }
 
   if (activeFilter !== 'all') {
     return (
@@ -308,12 +349,15 @@ export const RecipeBookPage = () => {
           <div className="relative">
             <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#4c4546]" />
             <input
+              ref={scopedSearchRef}
               className="w-full rounded-lg border-none bg-[#f3f3f3] py-4 pl-12 pr-4 text-base text-[#1b1b1b] outline-none transition placeholder:text-[#4c4546]/60 focus:ring-1 focus:ring-[#1b1b1b]"
               placeholder={`Search in ${activeTitle}`}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitSearch(scopedSearchRef.current)
+              }}
             />
           </div>
         </div>
@@ -328,7 +372,11 @@ export const RecipeBookPage = () => {
         ) : null}
 
         <div className="flex flex-col gap-8">
-          {displayedRecipes.map((recipe) => <RecipeSearchRow key={recipe.id} recipe={recipe} />)}
+          {displayedRecipes.map((recipe, index) => (
+            <div key={recipe.id} ref={index === 0 ? (element) => { firstResultRef.current = element?.querySelector('a') || null } : undefined}>
+              <RecipeSearchRow recipe={recipe} />
+            </div>
+          ))}
         </div>
       </section>
     )
@@ -339,11 +387,15 @@ export const RecipeBookPage = () => {
       <div className="relative w-full">
         <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8a7266]" />
         <input
+          ref={bookSearchRef}
           className="h-11 w-full rounded-xl border-none bg-[#e4e2e1] pl-12 pr-4 text-base leading-6 text-[#1b1c1c] outline-none transition placeholder:text-[#8a7266] focus:ring-2 focus:ring-[#974400]"
           placeholder="Search your recipes..."
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submitSearch(bookSearchRef.current)
+          }}
         />
       </div>
 
@@ -366,6 +418,7 @@ export const RecipeBookPage = () => {
           {visibleCategories.map((folder, index) => (
             <CategoryCard
               key={folder.id}
+              folder={folder}
               title={folder.name}
               count={counts.get(folder.id) || 0}
               active={false}
@@ -411,7 +464,11 @@ export const RecipeBookPage = () => {
         ) : null}
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {displayedRecipes.map((recipe) => <RecipeBookCard key={recipe.id} recipe={recipe} />)}
+          {displayedRecipes.map((recipe, index) => (
+            <div key={recipe.id} ref={index === 0 ? (element) => { firstResultRef.current = element?.querySelector('a') || null } : undefined}>
+              <RecipeBookCard recipe={recipe} />
+            </div>
+          ))}
         </div>
       </section>
 
@@ -440,6 +497,21 @@ export const RecipeBookPage = () => {
               onChange={(event) => setName(event.target.value)}
               autoFocus
             />
+            <div className="mt-4 space-y-2">
+              <label className="text-sm font-semibold text-[#974400]" htmlFor="folder-image-url">Category Image URL</label>
+              <input
+                id="folder-image-url"
+                className="w-full rounded-lg border border-[#ddc1b3] bg-[#fbf9f8] px-4 py-3 text-sm outline-none focus:border-[#974400]"
+                placeholder="https://example.com/category.jpg"
+                value={imageUrl}
+                onChange={(event) => setImageUrl(event.target.value)}
+              />
+              {folderPreviewImage ? (
+                <div className="h-32 overflow-hidden rounded-lg bg-[#e4e2e1]">
+                  <img src={folderPreviewImage} alt="" className="h-full w-full object-cover" />
+                </div>
+              ) : null}
+            </div>
             <div className="mt-4 flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setModalOpen(false)}>Cancel</Button>
               <Button disabled={!name.trim()} className="flex-1">{editingId ? 'Save' : 'Create'}</Button>

@@ -130,9 +130,12 @@ create table if not exists public.recipe_folders (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) not null,
   name text not null,
+  image_url text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+alter table public.recipe_folders add column if not exists image_url text;
 
 create table if not exists public.recipe_folder_items (
   id uuid primary key default gen_random_uuid(),

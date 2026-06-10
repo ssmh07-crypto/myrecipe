@@ -1,5 +1,5 @@
 import { Link2, Plus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RecipeCard } from '../components/recipe/RecipeCard'
 import { Button } from '../components/ui/Button'
@@ -25,6 +25,8 @@ export const RecipeListPage = ({
   const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'imported'>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const firstResultRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -61,23 +63,23 @@ export const RecipeListPage = ({
   }
 
   const emptyDescription = !user
-    ? '비회원은 둘러보기만 가능합니다. 저장된 레시피를 보려면 로그인해 주세요.'
+    ? 'You can browse as a guest. Log in to see and save your recipes.'
     : sourceFilter === 'imported'
-      ? '아직 링크로 가져온 레시피가 없습니다.'
+      ? 'No imported recipes yet.'
       : sourceFilter === 'manual'
-        ? '아직 직접 작성한 레시피가 없습니다.'
-        : '직접 작성하거나 샘플 레시피 3개를 저장해 시작할 수 있습니다.'
+        ? 'No manually written recipes yet.'
+        : 'Write a recipe or save sample recipes to get started.'
 
   const emptyAction = !user ? (
-    <Link to="/login"><Button>로그인하기</Button></Link>
+    <Link to="/login"><Button>Log in</Button></Link>
   ) : sourceFilter === 'imported' ? (
-    <Link to="/recipes/import"><Button><Link2 size={17} />링크로 가져오기</Button></Link>
+    <Link to="/recipes/import"><Button><Link2 size={17} />Import from Link</Button></Link>
   ) : sourceFilter === 'manual' ? (
-    <Link to="/recipes/new"><Button>새 레시피</Button></Link>
+    <Link to="/recipes/new"><Button>New Recipe</Button></Link>
   ) : (
     <div className="flex justify-center gap-2">
-      <Link to="/recipes/new"><Button>새 레시피</Button></Link>
-      <Button type="button" variant="secondary" onClick={seedSamples}>샘플 저장</Button>
+      <Link to="/recipes/new"><Button>New Recipe</Button></Link>
+      <Button type="button" variant="secondary" onClick={seedSamples}>Save Samples</Button>
     </div>
   )
 
@@ -89,23 +91,39 @@ export const RecipeListPage = ({
           <p className="mt-1 text-sm text-stone-500">{subtitle}</p>
         </div>
         <Link to={user ? '/recipes/new' : '/login'}>
-          <Button><Plus size={18} />작성</Button>
+          <Button><Plus size={18} />Write</Button>
         </Link>
       </div>
 
       {showImportAction ? <div>
         <Link to={user ? '/recipes/import' : '/login'}>
-          <Button variant="secondary" className="w-full"><Link2 size={17} />링크로 레시피 가져오기</Button>
+          <Button variant="secondary" className="w-full"><Link2 size={17} />Import Recipe from Link</Button>
         </Link>
       </div> : null}
 
       <div className="space-y-2 rounded-xl border border-amber-100 bg-white p-3">
-        <input id="recipe-search" className="w-full rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-3 text-sm outline-none focus:border-amber-500" placeholder="레시피 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input
+          ref={searchRef}
+          id="recipe-search"
+          className="w-full rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-3 text-sm outline-none focus:border-amber-500"
+          placeholder="Search recipes"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              searchRef.current?.blur()
+              window.setTimeout(() => {
+                firstResultRef.current?.focus()
+                firstResultRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+              }, 0)
+            }
+          }}
+        />
         <div className="grid grid-cols-3 gap-2">
           {[
-            ['all', '전체'],
-            ['manual', '내가 만든'],
-            ['imported', '가져온'],
+            ['all', 'All'],
+            ['manual', 'Manual'],
+            ['imported', 'Imported'],
           ].map(([value, label]) => (
             <button key={value} type="button" className={`rounded-lg px-3 py-2 text-xs font-semibold ${sourceFilter === value ? 'bg-amber-700 text-white' : 'bg-amber-50 text-stone-600'}`} onClick={() => setSourceFilter(value as typeof sourceFilter)}>
               {label}
@@ -118,12 +136,18 @@ export const RecipeListPage = ({
       {loading ? <LoadingState /> : null}
       {!loading && filtered.length === 0 ? (
         <EmptyState
-          title="저장된 레시피가 없습니다."
+          title="No saved recipes."
           description={emptyDescription}
           action={emptyAction}
         />
       ) : null}
-      <div className="space-y-3">{filtered.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} />)}</div>
+      <div className="space-y-3">
+        {filtered.map((recipe, index) => (
+          <div key={recipe.id} ref={index === 0 ? firstResultRef : undefined} tabIndex={-1}>
+            <RecipeCard recipe={recipe} />
+          </div>
+        ))}
+      </div>
     </section>
   )
 }

@@ -5,33 +5,10 @@ import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
 import { ensureRecipeFolders } from '../lib/recipeFolders'
+import { getFolderImage } from '../lib/folderImages'
 import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
-
-const folderImages: Record<string, { image: string; label: string }> = {
-  CHICKEN: {
-    image: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&q=80&w=900',
-    label: 'CHICKEN',
-  },
-  MEAT: {
-    image: 'https://images.unsplash.com/photo-1600891964599-f61ba0e24092?auto=format&fit=crop&q=80&w=900',
-    label: 'MEAT',
-  },
-  FISH: {
-    image: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&q=80&w=900',
-    label: 'FISH',
-  },
-  PASTA: {
-    image: 'https://images.unsplash.com/photo-1473093226795-af9932fe5856?auto=format&fit=crop&q=80&w=900',
-    label: 'PASTA',
-  },
-}
-
-const fallbackFolderImage = {
-  image: 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&q=80&w=900',
-  label: 'CATEGORY',
-}
 
 const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
   <Link to={`/recipes/${recipe.id}`} className="group block w-64 shrink-0 overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
@@ -59,25 +36,29 @@ const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
   </Link>
 )
 
-const FolderTile = ({ folder, count }: { folder: RecipeFolder; count: number }) => (
-  <Link to={`/recipe-books?folder=${folder.id}`} className="group block overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
-    <div className="relative h-48 overflow-hidden bg-[#e4e2e1]">
+const FolderTile = ({ folder, count }: { folder: RecipeFolder; count: number }) => {
+  const folderImage = getFolderImage(folder)
+
+  return (
+    <Link to={`/recipe-books?folder=${folder.id}`} className="group block overflow-hidden rounded-xl bg-white shadow-sm transition active:scale-95">
+      <div className="relative h-48 overflow-hidden bg-[#e4e2e1]">
       <img
-        src={(folderImages[folder.name.trim().toUpperCase()] || fallbackFolderImage).image}
+        src={folderImage.image}
         alt=""
         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
       />
       <div className="absolute inset-0 flex items-center justify-center bg-black/25 px-4">
         <span className="text-center text-[28px] font-bold leading-[34px] tracking-[0.18em] text-white drop-shadow-sm">
-          {(folderImages[folder.name.trim().toUpperCase()]?.label || folder.name).toUpperCase()}
+          {folderImage.label.toUpperCase()}
         </span>
       </div>
       <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-[#4e6e00] shadow-sm backdrop-blur">
         {count}
       </span>
-    </div>
-  </Link>
-)
+      </div>
+    </Link>
+  )
+}
 
 export const HomePage = () => {
   const { user } = useAuth()
