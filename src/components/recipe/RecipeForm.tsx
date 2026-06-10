@@ -118,8 +118,7 @@ export const RecipeForm = ({
   const [removeStepImageIndexes, setRemoveStepImageIndexes] = useState<number[]>([])
   const previewUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : ''), [imageFile])
   const visibleImage = previewUrl || (!removeImage ? form.image_url : '')
-  const steps = form.steps_text.split('\n').map((step) => step.trim()).filter(Boolean)
-  const stepRows = steps.length ? steps : ['']
+  const stepRows = form.steps_text.length ? form.steps_text.split('\n') : ['']
   const isImported = form.source_type === 'imported'
 
   useEffect(() => {
