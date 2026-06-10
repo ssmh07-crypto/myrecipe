@@ -35,7 +35,7 @@ function App() {
           <Route path="/recipes/search" element={<AppLayout requireAuth={false}><RecipeListPage title="레시피 검색" subtitle="저장한 레시피를 이름과 메모로 찾아보세요." showImportAction={false} /></AppLayout>} />
           <Route path="/recipes/add" element={<AppLayout><RecipeAddPage /></AppLayout>} />
           <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
-          <Route path="/recipes/import" element={<AppLayout hideHeader hideNav><RecipeImportPage /></AppLayout>} />
+          <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
           <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
           <Route path="/recipes/:id" element={<AppLayout hideHeader hideNav><RecipeDetailPage /></AppLayout>} />
           <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />

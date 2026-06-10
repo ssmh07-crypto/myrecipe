@@ -1,9 +1,9 @@
-import { CloudSync, Link2, Lock, Sparkles, Wand2, X, Zap } from 'lucide-react'
+import { BadgeCheck, CloudSync, Info, Link2, Lock, Sparkles, Wand2, X, Zap } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RecipeForm } from '../components/recipe/RecipeForm'
-import { Button } from '../components/ui/Button'
 import { ErrorState, LoadingState } from '../components/ui/State'
 import { useAuth } from '../hooks/useAuth'
 import { usePremiumAccess } from '../hooks/usePremiumAccess'
@@ -107,6 +107,67 @@ const ImportPremiumGate = ({ accessError }: { accessError?: string }) => {
   )
 }
 
+const DraftPreview = ({ recipe }: { recipe: RecipeInput }) => {
+  const ingredients = recipe.ingredients.slice(0, 3)
+  const extraCount = Math.max(recipe.ingredients.length - ingredients.length, 0)
+
+  return (
+    <section className="animate-[import-fade-in_0.4s_ease-out_forwards] space-y-4">
+      <div className="overflow-hidden rounded-xl border border-[#e4e2e1] bg-white shadow-[0_4px_12px_rgba(0,0,0,0.05)]">
+        {recipe.image_url ? (
+          <div className="relative aspect-[3/2] w-full">
+            <img src={recipe.image_url} alt="" className="h-full w-full object-cover" />
+            <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-[#c8f17a] px-2 py-1 text-xs font-semibold text-[#4e6e00] shadow-sm">
+              <BadgeCheck size={17} />
+              Draft Extracted
+            </div>
+          </div>
+        ) : (
+          <div className="relative grid aspect-[3/2] w-full place-items-center bg-[#f0eded]">
+            <div className="grid h-20 w-20 place-items-center rounded-xl bg-white text-[#974400] shadow-sm">
+              <Wand2 size={38} />
+            </div>
+            <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-[#c8f17a] px-2 py-1 text-xs font-semibold text-[#4e6e00] shadow-sm">
+              <BadgeCheck size={17} />
+              Draft Extracted
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-4 p-4">
+          <div className="space-y-2">
+            <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{recipe.title || 'Imported Recipe Draft'}</h2>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-lg bg-[#e4e2e1] px-2 py-1 text-xs font-medium text-[#564338]">Imported</span>
+              {recipe.difficulty ? <span className="rounded-lg bg-[#e4e2e1] px-2 py-1 text-xs font-medium text-[#564338]">{recipe.difficulty}</span> : null}
+            </div>
+          </div>
+
+          {ingredients.length ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold uppercase leading-5 text-[#974400]">Ingredients Preview</p>
+              <ul className="space-y-1">
+                {ingredients.map((ingredient, index) => (
+                  <li key={`${ingredient.name}-${index}`} className="flex items-center gap-2 text-base leading-6 text-[#564338]">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#974400]/40" />
+                    <span>{ingredient.amount ? `${ingredient.amount} ` : ''}{ingredient.unit ? `${ingredient.unit} ` : ''}{ingredient.name}</span>
+                  </li>
+                ))}
+                {extraCount ? <li className="text-xs font-medium italic leading-4 text-[#8a7266]">+ {extraCount} more ingredients...</li> : null}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="flex items-start gap-4 rounded-lg border-l-4 border-[#765700] bg-[#ffdfa0]/25 p-4">
+            <Info size={20} className="mt-0.5 shrink-0 text-[#765700]" />
+            <p className="text-base leading-6 text-[#5c4300]">Please review and edit this draft before saving to your book.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export const RecipeImportPage = () => {
   const { user } = useAuth()
   const { hasImportAccess, loading: accessLoading, error: accessError } = usePremiumAccess()
@@ -125,10 +186,15 @@ export const RecipeImportPage = () => {
       const data = await importRecipeFromUrl(url)
       setRecipe(normalizeRecipeInput({ ...emptyRecipeInput(), ...data, source_url: data.source_url || url, source_type: 'imported' }))
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : '가져오기에 실패했습니다.')
+      setError(nextError instanceof Error ? nextError.message : 'Failed to import recipe.')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleImportSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void importRecipe()
   }
 
   const saveRecipe = async ({ recipe: value, imageFile, stepImageFiles }: RecipeFormResult) => {
@@ -144,7 +210,7 @@ export const RecipeImportPage = () => {
       }
       navigate(`/recipes/${data.id}`)
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : '레시피 저장에 실패했습니다.')
+      setError(nextError instanceof Error ? nextError.message : 'Failed to save recipe.')
     } finally {
       setSaving(false)
     }
@@ -155,25 +221,62 @@ export const RecipeImportPage = () => {
   if (!hasImportAccess) return <ImportPremiumGate accessError={accessError} />
 
   return (
-    <section className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-stone-950">링크로 가져오기</h1>
-        <p className="mt-1 text-sm text-stone-500">권한이 있는 블로그나 웹사이트 레시피 URL을 정리해 개인 레시피 초안으로 저장합니다.</p>
-      </div>
-      <div className="space-y-3 rounded-xl border border-amber-100 bg-white p-4">
-        <input className="w-full rounded-lg border border-amber-100 px-3 py-3 text-sm outline-none focus:border-amber-500" placeholder="레시피 링크 붙여넣기" value={url} onChange={(event) => setUrl(event.target.value)} />
-        <p className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-stone-600">
-          영상/SNS 자동 추출, 유료 콘텐츠 우회, 저작권을 침해하는 저장은 지원하지 않습니다.
-        </p>
-        <Button className="w-full" disabled={loading || !url} onClick={importRecipe}>
-          <Wand2 size={18} /> 레시피 뽑기
-        </Button>
-      </div>
+    <section className="mx-auto max-w-lg space-y-8 pb-6">
+      <section className="mt-2">
+        <h1 className="text-[28px] font-bold leading-[34px] text-[#1b1c1c]">Import Recipe</h1>
+        <p className="mt-1 text-base leading-6 text-[#564338]">Save any recipe from the web to your digital notebook instantly.</p>
+      </section>
+
+      {!recipe && !loading ? (
+        <form className="animate-[import-fade-in_0.4s_ease-out_forwards] space-y-4" onSubmit={handleImportSubmit}>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold uppercase leading-5 text-[#564338]" htmlFor="recipe-url">Recipe URL</label>
+            <div className="relative">
+              <input
+                id="recipe-url"
+                className="h-11 w-full rounded-lg border-none bg-[#e4e2e1] px-4 pr-11 text-base text-[#1b1c1c] outline-none transition placeholder:text-[#8a7266] focus:ring-2 focus:ring-[#974400]"
+                placeholder="Paste recipe URL here..."
+                type="url"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+              />
+              <Link2 size={21} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8a7266]" />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#974400] px-4 py-2 text-sm font-bold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!url}
+          >
+            <Wand2 size={19} />
+            Extract Recipe
+          </button>
+
+          <p className="rounded-lg bg-[#ffdfa0]/25 p-3 text-xs font-medium leading-5 text-[#564338]">
+            Video content, social posts, paywalled websites, and copyright-infringing imports are not supported.
+          </p>
+        </form>
+      ) : null}
+
+      {loading ? (
+        <section className="animate-[import-fade-in_0.4s_ease-out_forwards] space-y-4 py-8 text-center">
+          <div className="relative h-1 w-full overflow-hidden rounded-full bg-[#e4e2e1]">
+            <div className="absolute top-0 h-full rounded-full bg-[#974400] animate-[import-loading-pulse_2s_ease-in-out_infinite]" />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-lg font-semibold leading-7 text-[#974400]">Extracting ingredients and steps...</p>
+            <p className="text-xs font-medium leading-4 text-[#564338]">Our AI is reading the culinary details for you.</p>
+          </div>
+        </section>
+      ) : null}
+
       {error ? <ErrorState message={error} /> : null}
+
       {recipe ? (
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-stone-700">저장 전 내용을 확인하고 수정하세요.</p>
-          <RecipeForm initialValue={recipe} submitLabel="내 레시피로 저장" loading={saving} onSubmit={saveRecipe} />
+        <div className="space-y-4">
+          <DraftPreview recipe={recipe} />
+          <RecipeForm initialValue={recipe} submitLabel="Save to My Book" loading={saving} onSubmit={saveRecipe} />
         </div>
       ) : null}
     </section>

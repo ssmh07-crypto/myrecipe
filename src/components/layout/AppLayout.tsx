@@ -5,10 +5,10 @@ import { useAuth } from '../../hooks/useAuth'
 import { LoadingState } from '../ui/State'
 
 const tabs = [
-  { to: '/recipes', label: '홈', icon: Home },
-  { to: '/recipes/search', label: '검색', icon: Search },
-  { to: '/recipes/add', label: '추가', icon: Plus },
-  { to: '/recipe-books', label: '레시피북', icon: BookMarked },
+  { to: '/recipes', label: 'Home', icon: Home },
+  { to: '/recipes/search', label: 'Search', icon: Search },
+  { to: '/recipes/add', label: 'Add', icon: Plus },
+  { to: '/recipe-books', label: 'Book', icon: BookMarked },
   { to: '/premium', label: 'Premium', icon: Sparkles },
 ]
 
@@ -57,7 +57,7 @@ export const AppLayout = ({
                 key={label}
                 to={to}
                 className={() => {
-                  const isActive = location.pathname === to
+                  const isActive = location.pathname === to || (to === '/recipes/add' && ['/recipes/import', '/recipes/new'].some((path) => location.pathname.startsWith(path)))
                   return (
                   `flex min-h-14 flex-col items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-semibold transition active:scale-90 ${isActive ? 'bg-[#c8f17a] text-[#4e6e00]' : 'text-[#564338]'}`
                   )
