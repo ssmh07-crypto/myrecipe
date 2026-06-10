@@ -1,4 +1,4 @@
-import { BookMarked, BookOpen, Home, Plus, Search, Settings, Sparkles } from 'lucide-react'
+import { BookMarked, BookOpen, CalendarDays, Home, Plus, Settings, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -6,7 +6,7 @@ import { LoadingState } from '../ui/State'
 
 const tabs = [
   { to: '/recipes', label: 'Home', icon: Home },
-  { to: '/recipes/search', label: 'Search', icon: Search },
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays },
   { to: '/recipes/add', label: 'Add', icon: Plus },
   { to: '/recipe-books', label: 'Book', icon: BookMarked },
   { to: '/premium', label: 'Premium', icon: Sparkles },

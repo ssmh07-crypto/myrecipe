@@ -146,7 +146,7 @@ export const HomePage = () => {
       <button
         type="button"
         className="flex min-h-11 w-full items-center gap-4 rounded-xl bg-[#e4e2e1] px-4 text-left text-base text-[#564338] transition focus:outline-none focus:ring-2 focus:ring-[#974400]"
-        onClick={() => navigate('/recipes/search')}
+        onClick={() => navigate('/recipe-books')}
       >
         <Search size={22} className="text-[#8a7266]" />
         <span>Search your recipes...</span>

@@ -1,4 +1,4 @@
-import { CakeSlice, CalendarDays, Edit, Filter, FolderPlus, Heart, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
+import { ArrowLeft, CakeSlice, CalendarDays, Edit, FolderPlus, Heart, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -50,6 +50,44 @@ const RecipeBookCard = ({ recipe }: { recipe: Recipe }) => (
       </div>
       <h3 className="truncate text-[22px] font-semibold leading-7 text-[#1b1c1c]">{recipe.title}</h3>
       <p className="mt-1 line-clamp-2 text-base leading-6 text-[#8a7266]">{recipe.memo || recipe.steps_text || 'Open this recipe to review ingredients and cooking steps.'}</p>
+    </div>
+  </Link>
+)
+
+const RecipeSearchRow = ({ recipe }: { recipe: Recipe }) => (
+  <Link to={`/recipes/${recipe.id}`} className="group flex flex-col gap-6 border-b border-[#ddc1b3] bg-[#fbf9f8] pb-8 transition active:scale-[0.99] last:border-0 md:flex-row">
+    <div className="relative h-56 w-full shrink-0 overflow-hidden rounded-xl bg-[#e4e2e1] md:w-56">
+      {recipe.image_url ? (
+        <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-110" />
+      ) : (
+        <div className="grid h-full w-full place-items-center text-[#1b1c1c]">
+          <Utensils size={46} />
+        </div>
+      )}
+      {recipe.is_favorite ? (
+        <div className="absolute right-3 top-3 rounded-md bg-white/90 px-2 py-1 text-[#ba1a1a] shadow-sm backdrop-blur">
+          <Heart size={18} fill="currentColor" />
+        </div>
+      ) : null}
+    </div>
+    <div className="flex flex-col justify-center gap-2">
+      <div className="flex items-center gap-2">
+        <span className="rounded-md bg-[#eeeeee] px-2 py-0.5 text-xs font-medium text-[#4c4546]">{sourceLabel(recipe)}</span>
+        <div className="flex items-center gap-1 text-[#4c4546]">
+          <Star size={14} fill="currentColor" />
+          <span className="text-xs font-medium">{recipe.is_favorite ? 'Saved' : 'Recipe'}</span>
+        </div>
+      </div>
+      <h2 className="text-2xl font-semibold leading-tight text-[#1b1b1b] group-hover:underline">{recipe.title}</h2>
+      <div className="flex items-center gap-4 text-[#4c4546]">
+        <div className="flex items-center gap-1">
+          <Utensils size={18} />
+          <span className="text-xs font-medium">{normalizeDifficultyLabel(recipe.difficulty)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-medium">{recipe.servings || 0} servings</span>
+        </div>
+      </div>
     </div>
   </Link>
 )
@@ -248,6 +286,54 @@ export const RecipeBookPage = () => {
       ? folders.find((folder) => folder.id === selectedFolderId)?.name || 'Category Recipes'
       : 'All Recipes'
 
+  if (activeFilter !== 'all') {
+    return (
+      <section className="mx-auto max-w-3xl pb-8">
+        <div className="-mx-4 mb-6 bg-[#fbf9f8] px-4 pb-6">
+          <div className="mb-5 flex items-center gap-4">
+            <button
+              type="button"
+              aria-label="Back to recipe book"
+              className="grid h-10 w-10 place-items-center rounded-full text-[#1b1b1b] transition hover:bg-[#e2e2e2]"
+              onClick={() => {
+                setActiveFilter('all')
+                setSelectedFolderId('')
+                setQuery('')
+              }}
+            >
+              <ArrowLeft size={22} />
+            </button>
+            <h1 className="text-2xl font-semibold leading-tight text-[#1b1b1b]">{activeTitle}</h1>
+          </div>
+          <div className="relative">
+            <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#4c4546]" />
+            <input
+              className="w-full rounded-lg border-none bg-[#f3f3f3] py-4 pl-12 pr-4 text-base text-[#1b1b1b] outline-none transition placeholder:text-[#4c4546]/60 focus:ring-1 focus:ring-[#1b1b1b]"
+              placeholder={`Search in ${activeTitle}`}
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              autoFocus
+            />
+          </div>
+        </div>
+
+        {error ? <ErrorState message={error} /> : null}
+
+        {!displayedRecipes.length ? (
+          <EmptyState
+            title={query ? 'No matching recipes.' : `No recipes in ${activeTitle}.`}
+            description={query ? 'Try another keyword inside this category.' : 'Add recipes to this category from a recipe detail page.'}
+          />
+        ) : null}
+
+        <div className="flex flex-col gap-8">
+          {displayedRecipes.map((recipe) => <RecipeSearchRow key={recipe.id} recipe={recipe} />)}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="mx-auto max-w-2xl space-y-8 pb-8">
       <div className="relative w-full">
@@ -273,7 +359,7 @@ export const RecipeBookPage = () => {
           <CategoryCard
             title="Favorites"
             count={recipes.filter((recipe) => recipe.is_favorite).length}
-            active={activeFilter === 'favorites'}
+            active={false}
             iconIndex={0}
             onClick={() => setActiveFilter('favorites')}
           />
@@ -282,7 +368,7 @@ export const RecipeBookPage = () => {
               key={folder.id}
               title={folder.name}
               count={counts.get(folder.id) || 0}
-              active={activeFilter === 'folder' && selectedFolderId === folder.id}
+              active={false}
               iconIndex={index + 1}
               onClick={() => {
                 setActiveFilter('folder')
@@ -311,14 +397,7 @@ export const RecipeBookPage = () => {
         <div className="flex items-center justify-between">
           <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{activeTitle}</h2>
           <div className="flex items-center gap-2">
-            {activeFilter !== 'all' ? (
-              <button type="button" className="min-h-10 rounded-full bg-[#f0eded] px-3 text-xs font-semibold text-[#564338]" onClick={() => { setActiveFilter('all'); setSelectedFolderId('') }}>
-                Clear
-              </button>
-            ) : null}
-            <button type="button" aria-label="Filter recipes" className="grid h-10 w-10 place-items-center rounded-full text-[#8a7266] transition hover:bg-[#e4e2e1]">
-              <Filter size={21} />
-            </button>
+            <span className="rounded-full bg-[#f0eded] px-3 py-2 text-xs font-semibold text-[#564338]">{displayedRecipes.length} total</span>
           </div>
         </div>
 

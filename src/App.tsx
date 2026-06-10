@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage').then((module) => ({ default: module.FavoritesPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((module) => ({ default: module.CalendarPage })))
 const PremiumPage = lazy(() => import('./pages/PremiumPage').then((module) => ({ default: module.PremiumPage })))
 const RecipeBookPage = lazy(() => import('./pages/RecipeBookPage').then((module) => ({ default: module.RecipeBookPage })))
 const RecipeAddPage = lazy(() => import('./pages/RecipeAddPage').then((module) => ({ default: module.RecipeAddPage })))
@@ -32,7 +33,8 @@ function App() {
           <Route path="/" element={<Navigate to="/recipes" replace />} />
           <Route path="/recipes" element={<AppLayout requireAuth={false}><HomePage /></AppLayout>} />
           <Route path="/recipes/recent" element={<AppLayout requireAuth={false}><RecipeListPage title="Recent Recipes" subtitle="Your newest saved recipes, sorted by creation date." showImportAction={false} /></AppLayout>} />
-          <Route path="/recipes/search" element={<AppLayout requireAuth={false}><RecipeListPage title="Recipe Search" subtitle="Find saved recipes by name and notes." showImportAction={false} /></AppLayout>} />
+          <Route path="/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
+          <Route path="/recipes/search" element={<Navigate to="/calendar" replace />} />
           <Route path="/recipes/add" element={<AppLayout><RecipeAddPage /></AppLayout>} />
           <Route path="/recipes/new" element={<AppLayout hideNav><RecipeNewPage /></AppLayout>} />
           <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
