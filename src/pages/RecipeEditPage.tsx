@@ -38,19 +38,22 @@ export const RecipeEditPage = () => {
       if (nextError) throw new Error(nextError.message)
       navigate(`/recipes/${id}`)
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : '레시피 수정에 실패했습니다.')
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update recipe.')
     } finally {
       setSaving(false)
     }
   }
 
   if (loading) return <LoadingState />
-  if (error || !recipe) return <ErrorState message={error || '레시피를 찾을 수 없습니다.'} />
+  if (error || !recipe) return <ErrorState message={error || 'Recipe not found.'} />
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-2xl font-bold text-stone-950">레시피 수정</h1>
-      <RecipeForm initialValue={recipe} submitLabel="수정 완료" loading={saving} onSubmit={updateRecipe} />
+    <section className="mx-auto max-w-2xl space-y-6 pb-8">
+      <section className="mt-2">
+        <h1 className="text-[28px] font-bold leading-[34px] text-[#1b1c1c]">Edit Recipe</h1>
+        <p className="text-base leading-6 text-[#564338]">Capture your culinary masterpiece with precision.</p>
+      </section>
+      <RecipeForm initialValue={recipe} submitLabel="Save Recipe" loading={saving} onSubmit={updateRecipe} actionLayout="sticky" />
     </section>
   )
 }

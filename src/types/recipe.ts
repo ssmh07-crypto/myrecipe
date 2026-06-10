@@ -56,7 +56,7 @@ export const emptyRecipeInput = (): RecipeInput => ({
   title: '',
   image_url: '',
   servings: 1,
-  difficulty: '쉬움',
+  difficulty: 'Easy',
   ingredients: [],
   seasonings: [],
   steps_text: '',

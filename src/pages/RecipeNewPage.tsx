@@ -27,17 +27,20 @@ export const RecipeNewPage = ({ initialRecipe }: { initialRecipe?: RecipeInput }
       }
       navigate(`/recipes/${data.id}`)
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : '레시피 저장에 실패했습니다.')
+      setError(nextError instanceof Error ? nextError.message : 'Failed to save recipe.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-2xl font-bold text-stone-950">레시피 작성</h1>
+    <section className="mx-auto max-w-2xl space-y-6 pb-8">
+      <section className="mt-2">
+        <h1 className="text-[28px] font-bold leading-[34px] text-[#1b1c1c]">New Recipe</h1>
+        <p className="text-base leading-6 text-[#564338]">Capture your culinary masterpiece with precision.</p>
+      </section>
       {error ? <ErrorState message={error} /> : null}
-      <RecipeForm initialValue={normalizeRecipeInput(initialRecipe || emptyRecipeInput())} submitLabel="저장하기" loading={loading} onSubmit={createRecipe} />
+      <RecipeForm initialValue={normalizeRecipeInput(initialRecipe || emptyRecipeInput())} submitLabel="Save Recipe" loading={loading} onSubmit={createRecipe} actionLayout="sticky" />
     </section>
   )
 }

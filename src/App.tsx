@@ -31,14 +31,14 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<Navigate to="/recipes" replace />} />
           <Route path="/recipes" element={<AppLayout requireAuth={false}><HomePage /></AppLayout>} />
-          <Route path="/recipes/recent" element={<AppLayout requireAuth={false}><RecipeListPage title="최근 레시피" subtitle="최근에 등록한 레시피를 최신순으로 모았습니다." showImportAction={false} /></AppLayout>} />
-          <Route path="/recipes/search" element={<AppLayout requireAuth={false}><RecipeListPage title="레시피 검색" subtitle="저장한 레시피를 이름과 메모로 찾아보세요." showImportAction={false} /></AppLayout>} />
+          <Route path="/recipes/recent" element={<AppLayout requireAuth={false}><RecipeListPage title="Recent Recipes" subtitle="Your newest saved recipes, sorted by creation date." showImportAction={false} /></AppLayout>} />
+          <Route path="/recipes/search" element={<AppLayout requireAuth={false}><RecipeListPage title="Recipe Search" subtitle="Find saved recipes by name and notes." showImportAction={false} /></AppLayout>} />
           <Route path="/recipes/add" element={<AppLayout><RecipeAddPage /></AppLayout>} />
-          <Route path="/recipes/new" element={<AppLayout><RecipeNewPage /></AppLayout>} />
+          <Route path="/recipes/new" element={<AppLayout hideNav><RecipeNewPage /></AppLayout>} />
           <Route path="/recipes/import" element={<AppLayout><RecipeImportPage /></AppLayout>} />
           <Route path="/recipes/import/youtube" element={<Navigate to="/recipes/import" replace />} />
           <Route path="/recipes/:id" element={<AppLayout hideHeader hideNav><RecipeDetailPage /></AppLayout>} />
-          <Route path="/recipes/:id/edit" element={<AppLayout><RecipeEditPage /></AppLayout>} />
+          <Route path="/recipes/:id/edit" element={<AppLayout hideNav><RecipeEditPage /></AppLayout>} />
           <Route path="/recipe-books" element={<AppLayout><RecipeBookPage /></AppLayout>} />
           <Route path="/premium" element={<AppLayout requireAuth={false}><PremiumPage /></AppLayout>} />
           <Route path="/favorites" element={<AppLayout><FavoritesPage /></AppLayout>} />

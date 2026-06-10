@@ -12,12 +12,19 @@ type LegacyRecipe = Partial<Recipe> & {
   step_images?: string[]
 }
 
+const normalizeDifficulty = (value?: string) => {
+  if (value === '\uc26c\uc6c0') return 'Easy'
+  if (value === '\ubcf4\ud1b5') return 'Medium'
+  if (value === '\uc5b4\ub824\uc6c0') return 'Hard'
+  return value || 'Easy'
+}
+
 export const normalizeRecipe = (recipe: LegacyRecipe): Recipe => ({
   ...(recipe as Recipe),
   title: recipe.title || '',
   image_url: recipe.image_url || '',
   servings: recipe.servings ?? 1,
-  difficulty: recipe.difficulty || '쉬움',
+  difficulty: normalizeDifficulty(recipe.difficulty),
   ingredients: normalizeIngredientItems(recipe.ingredients),
   seasonings: normalizeIngredientItems(recipe.seasonings),
   steps_text: recipe.steps_text || recipe.steps?.join('\n') || '',
@@ -32,7 +39,7 @@ export const normalizeRecipeInput = (recipe: Partial<RecipeInput>): RecipeInput 
   title: recipe.title || '',
   image_url: recipe.image_url || '',
   servings: recipe.servings ?? 1,
-  difficulty: recipe.difficulty || '쉬움',
+  difficulty: normalizeDifficulty(recipe.difficulty),
   ingredients: normalizeIngredientItems(recipe.ingredients),
   seasonings: normalizeIngredientItems(recipe.seasonings),
   steps_text: recipe.steps_text || '',
