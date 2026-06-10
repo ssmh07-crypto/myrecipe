@@ -1,6 +1,6 @@
-import { Edit, FolderOpen, Heart, Plus, Signal, Trash2, Users, X } from 'lucide-react'
+import { CakeSlice, CalendarDays, Edit, Filter, FolderPlus, Heart, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, MouseEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
@@ -10,48 +10,106 @@ import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
 
-type RecipeBookTab = 'all' | 'favorites' | 'categories'
+type BookFilter = 'all' | 'favorites' | 'folder'
 
-const tabs: { value: RecipeBookTab; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'favorites', label: 'Favorites' },
-  { value: 'categories', label: 'Categories' },
+const folderIconStyles = [
+  { icon: Heart, bg: 'bg-[#ffdbc9]', color: 'text-[#974400]' },
+  { icon: Timer, bg: 'bg-[#c8f17a]', color: 'text-[#496800]' },
+  { icon: CakeSlice, bg: 'bg-[#ffdfa0]', color: 'text-[#765700]' },
+  { icon: CalendarDays, bg: 'bg-[#ffdbc9]', color: 'text-[#974400]' },
 ]
 
-const sourceLabel = (recipe: Recipe) => (recipe.source_type === 'imported' ? '가져온 레시피' : '내가 만든 레시피')
+const sourceLabel = (recipe: Recipe) => (recipe.source_type === 'imported' ? 'Imported' : 'Manual')
+
+const normalizeDifficultyLabel = (value: string) => {
+  if (value === '\uc26c\uc6c0') return 'Easy'
+  if (value === '\ubcf4\ud1b5') return 'Medium'
+  if (value === '\uc5b4\ub824\uc6c0') return 'Hard'
+  return value || 'Unrated'
+}
 
 const RecipeBookCard = ({ recipe }: { recipe: Recipe }) => (
-  <Link to={`/recipes/${recipe.id}`} className="group block overflow-hidden rounded-xl bg-white shadow-[0_12px_32px_-4px_rgba(154,64,34,0.08)] transition active:scale-[0.98]">
-    <div className="relative h-56 overflow-hidden bg-[#f5ece7]">
+  <Link to={`/recipes/${recipe.id}`} className="group block overflow-hidden rounded-xl bg-white shadow-[0_4px_12px_rgba(0,0,0,0.05)] transition active:scale-[0.98]">
+    <div className="relative aspect-[3/2] overflow-hidden bg-[#f0eded]">
       {recipe.image_url ? (
         <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
       ) : (
-        <div className="grid h-full w-full place-items-center bg-[#efe6e2] text-5xl">🍽️</div>
-      )}
-      {recipe.is_favorite ? (
-        <div className="absolute right-3 top-3 rounded-full bg-white/90 p-2 text-[#9a4022] shadow-sm backdrop-blur">
-          <Heart size={19} className="fill-current" />
+        <div className="grid h-full w-full place-items-center text-[#974400]">
+          <Utensils size={46} />
         </div>
-      ) : null}
-      <span className={`absolute left-3 top-3 rounded-full px-3 py-1 text-xs font-semibold shadow-sm backdrop-blur ${recipe.source_type === 'imported' ? 'bg-sky-50/95 text-sky-700' : 'bg-emerald-50/95 text-emerald-700'}`}>
-        {sourceLabel(recipe)}
-      </span>
-    </div>
-    <div className="space-y-3 bg-[#fbf2ed] p-4">
-      <h3 className="line-clamp-2 font-serif text-2xl font-semibold leading-tight text-[#1e1b18]">{recipe.title}</h3>
-      <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-[#56423c]">
-        <span className="inline-flex items-center gap-1">
-          <Users size={17} />
-          {recipe.servings || 0}인분
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Signal size={17} />
-          {recipe.difficulty || '난이도 미정'}
-        </span>
+      )}
+      <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-white/85 px-2 py-1 text-xs font-semibold text-[#1b1c1c] shadow-sm backdrop-blur">
+        <Star size={15} className={recipe.is_favorite ? 'fill-[#974400] text-[#974400]' : 'text-[#974400]'} />
+        {recipe.is_favorite ? 'Saved' : sourceLabel(recipe)}
       </div>
+    </div>
+    <div className="p-4">
+      <div className="mb-2 flex flex-wrap gap-1">
+        <span className="rounded bg-[#c8f17a] px-1.5 py-0.5 text-xs font-medium text-[#4e6e00]">{normalizeDifficultyLabel(recipe.difficulty)}</span>
+        <span className="rounded bg-[#e4e2e1] px-1.5 py-0.5 text-xs font-medium text-[#564338]">{recipe.servings || 0} servings</span>
+      </div>
+      <h3 className="truncate text-[22px] font-semibold leading-7 text-[#1b1c1c]">{recipe.title}</h3>
+      <p className="mt-1 line-clamp-2 text-base leading-6 text-[#8a7266]">{recipe.memo || recipe.steps_text || 'Open this recipe to review ingredients and cooking steps.'}</p>
     </div>
   </Link>
 )
+
+const CategoryCard = ({
+  title,
+  count,
+  active,
+  iconIndex,
+  onClick,
+  onEdit,
+  onDelete,
+}: {
+  title: string
+  count: number
+  active: boolean
+  iconIndex: number
+  onClick: () => void
+  onEdit?: (event: MouseEvent<HTMLButtonElement>) => void
+  onDelete?: (event: MouseEvent<HTMLButtonElement>) => void
+}) => {
+  const style = folderIconStyles[iconIndex % folderIconStyles.length]
+  const Icon = style.icon
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`group flex cursor-pointer flex-col gap-2 rounded-xl p-4 transition active:scale-[0.98] ${active ? 'bg-[#e4e2e1] ring-2 ring-[#974400]/25' : 'bg-[#f6f3f2] hover:bg-[#e4e2e1]'}`}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') onClick()
+      }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className={`grid h-10 w-10 place-items-center rounded-lg ${style.bg} ${style.color} transition group-hover:scale-110`}>
+          <Icon size={21} fill={Icon === Heart ? 'currentColor' : 'none'} />
+        </div>
+        {onEdit || onDelete ? (
+          <div className="flex gap-1">
+            {onEdit ? (
+              <button type="button" aria-label={`Edit ${title}`} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#564338] shadow-sm" onClick={onEdit}>
+                <Edit size={15} />
+              </button>
+            ) : null}
+            {onDelete ? (
+              <button type="button" aria-label={`Delete ${title}`} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#ba1a1a] shadow-sm" onClick={onDelete}>
+                <Trash2 size={15} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <div>
+        <p className="text-sm font-semibold leading-5 text-[#1b1c1c]">{title}</p>
+        <p className="text-xs font-medium leading-4 text-[#8a7266]">{count} Recipes</p>
+      </div>
+    </div>
+  )
+}
 
 export const RecipeBookPage = () => {
   const { user } = useAuth()
@@ -60,7 +118,9 @@ export const RecipeBookPage = () => {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [items, setItems] = useState<{ folder_id: string; recipe_id: string }[]>([])
   const [selectedFolderId, setSelectedFolderId] = useState('')
-  const [activeTab, setActiveTab] = useState<RecipeBookTab>('all')
+  const [activeFilter, setActiveFilter] = useState<BookFilter>('all')
+  const [query, setQuery] = useState('')
+  const [showAllCategories, setShowAllCategories] = useState(false)
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -78,7 +138,7 @@ export const RecipeBookPage = () => {
         supabase.from('recipes').select('*').order('created_at', { ascending: false }),
       ])
       if (itemResult.error || recipeResult.error) {
-        throw new Error(itemResult.error?.message || recipeResult.error?.message || '레시피북을 불러오지 못했습니다.')
+        throw new Error(itemResult.error?.message || recipeResult.error?.message || 'Failed to load recipe book.')
       }
       setFolders(nextFolders)
       setItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
@@ -86,17 +146,15 @@ export const RecipeBookPage = () => {
       const folderParam = searchParams.get('folder')
       const folderFromQuery = folderParam ? nextFolders.find((folder) => folder.id === folderParam) : null
       if (folderFromQuery) {
-        setActiveTab('categories')
+        setActiveFilter('folder')
         setSelectedFolderId(folderFromQuery.id)
-      } else if (!selectedFolderId && nextFolders[0]) {
-        setSelectedFolderId(nextFolders[0].id)
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : '레시피북을 불러오지 못했습니다.')
+      setError(nextError instanceof Error ? nextError.message : 'Failed to load recipe book.')
     } finally {
       setLoading(false)
     }
-  }, [searchParams, selectedFolderId, user])
+  }, [searchParams, user])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -111,16 +169,28 @@ export const RecipeBookPage = () => {
     return map
   }, [items])
 
-  const selectedFolder = folders.find((folder) => folder.id === selectedFolderId)
+  const visibleCategories = showAllCategories ? folders : folders.slice(0, 3)
 
   const displayedRecipes = useMemo(() => {
-    if (activeTab === 'favorites') return recipes.filter((recipe) => recipe.is_favorite)
-    if (activeTab === 'categories') {
-      const recipeIds = new Set(items.filter((item) => item.folder_id === selectedFolderId).map((item) => item.recipe_id))
-      return recipes.filter((recipe) => recipeIds.has(recipe.id))
-    }
-    return recipes
-  }, [activeTab, items, recipes, selectedFolderId])
+    const normalizedQuery = query.trim().toLowerCase()
+    const filteredByCategory = recipes.filter((recipe) => {
+      if (activeFilter === 'favorites') return recipe.is_favorite
+      if (activeFilter === 'folder') {
+        const recipeIds = new Set(items.filter((item) => item.folder_id === selectedFolderId).map((item) => item.recipe_id))
+        return recipeIds.has(recipe.id)
+      }
+      return true
+    })
+
+    if (!normalizedQuery) return filteredByCategory
+
+    return filteredByCategory.filter((recipe) =>
+      [recipe.title, recipe.memo, recipe.difficulty, recipe.steps_text, sourceLabel(recipe)]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery),
+    )
+  }, [activeFilter, items, query, recipes, selectedFolderId])
 
   const openCreateModal = () => {
     setEditingId('')
@@ -147,7 +217,7 @@ export const RecipeBookPage = () => {
     }
     if (!editingId && 'data' in result && result.data?.id) {
       setSelectedFolderId(result.data.id as string)
-      setActiveTab('categories')
+      setActiveFilter('folder')
     }
     setName('')
     setEditingId('')
@@ -156,128 +226,144 @@ export const RecipeBookPage = () => {
   }
 
   const deleteFolder = async (folderId: string) => {
-    if (!window.confirm('카테고리를 삭제할까요? 레시피는 삭제되지 않습니다.')) return
+    if (!window.confirm('Delete this category? Recipes will not be deleted.')) return
     setError('')
     const { error: nextError } = await supabase.from('recipe_folders').delete().eq('id', folderId)
     if (nextError) {
       setError(nextError.message)
       return
     }
-    if (selectedFolderId === folderId) setSelectedFolderId('')
+    if (selectedFolderId === folderId) {
+      setSelectedFolderId('')
+      setActiveFilter('all')
+    }
     await load()
   }
 
-  const switchTab = (tab: RecipeBookTab) => {
-    setActiveTab(tab)
-    if (tab === 'categories' && !selectedFolderId && folders[0]) setSelectedFolderId(folders[0].id)
-  }
+  if (loading) return <LoadingState label="Loading recipe book..." />
 
-  if (loading) return <LoadingState />
-
-  const emptyCopy = activeTab === 'favorites'
-    ? { title: '즐겨찾기한 레시피가 없습니다.', description: '레시피 상세 화면에서 하트를 눌러 즐겨찾기에 추가하세요.' }
-    : activeTab === 'categories'
-      ? { title: selectedFolder ? '이 카테고리에 담긴 레시피가 없습니다.' : '카테고리가 없습니다.', description: selectedFolder ? '레시피 상세에서 레시피북에 담기를 눌러 추가하세요.' : '오른쪽 아래 + 버튼으로 새 카테고리를 만드세요.' }
-      : { title: '저장된 레시피가 없습니다.', description: '직접 작성하거나 링크로 가져온 레시피를 레시피북에서 확인할 수 있습니다.' }
+  const activeTitle = activeFilter === 'favorites'
+    ? 'Favorites'
+    : activeFilter === 'folder'
+      ? folders.find((folder) => folder.id === selectedFolderId)?.name || 'Category Recipes'
+      : 'All Recipes'
 
   return (
-    <section className="space-y-6">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-[#89726b]">My Recipe Book</p>
-        <h1 className="font-serif text-3xl font-bold text-[#1e1b18]">레시피북</h1>
+    <section className="mx-auto max-w-2xl space-y-8 pb-8">
+      <div className="relative w-full">
+        <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8a7266]" />
+        <input
+          className="h-11 w-full rounded-xl border-none bg-[#e4e2e1] pl-12 pr-4 text-base leading-6 text-[#1b1c1c] outline-none transition placeholder:text-[#8a7266] focus:ring-2 focus:ring-[#974400]"
+          placeholder="Search your recipes..."
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
 
-      <div className="flex gap-4 overflow-x-auto border-b border-[#dcc1b9] no-scrollbar">
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => switchTab(tab.value)}
-            className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === tab.value ? 'border-[#9a4022] text-[#9a4022]' : 'border-transparent text-[#56423c]'}`}
-          >
-            {tab.label}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">My Category</h1>
+          <button type="button" className="text-sm font-semibold text-[#974400] hover:underline" onClick={() => setShowAllCategories((value) => !value)}>
+            {showAllCategories ? 'Show Less' : 'View All'}
           </button>
-        ))}
-      </div>
+        </div>
 
-      <div className={`flex gap-2 overflow-x-auto pb-2 no-scrollbar ${activeTab === 'categories' ? '' : 'opacity-40'}`}>
-        {folders.length ? folders.map((folder) => (
-          <button
-            key={folder.id}
-            type="button"
-            disabled={activeTab !== 'categories'}
-            onClick={() => {
-              setActiveTab('categories')
-              setSelectedFolderId(folder.id)
-            }}
-            className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition active:scale-95 ${activeTab === 'categories' && selectedFolderId === folder.id ? 'bg-[#b95837] text-white' : 'bg-[#e1dfdb] text-[#63635f]'}`}
-          >
-            {folder.name} · {counts.get(folder.id) || 0}
-          </button>
-        )) : (
-          <button type="button" onClick={openCreateModal} className="rounded-full bg-[#e1dfdb] px-4 py-2 text-xs font-semibold text-[#63635f]">
-            + 카테고리 만들기
-          </button>
-        )}
-      </div>
-
-      {activeTab === 'categories' && selectedFolder ? (
-        <div className="flex items-center justify-between rounded-xl bg-[#f5ece7] p-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center rounded-full bg-[#ffdbd0] text-[#9a4022]">
-              <FolderOpen size={21} />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate font-serif text-xl font-semibold text-[#1e1b18]">{selectedFolder.name}</p>
-              <p className="text-xs font-semibold text-[#89726b]">{counts.get(selectedFolder.id) || 0}개 레시피</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button type="button" aria-label="카테고리 수정" className="grid h-10 w-10 place-items-center rounded-full bg-white text-[#56423c]" onClick={() => openEditModal(selectedFolder)}>
-              <Edit size={17} />
+        <div className="grid grid-cols-2 gap-4">
+          <CategoryCard
+            title="Favorites"
+            count={recipes.filter((recipe) => recipe.is_favorite).length}
+            active={activeFilter === 'favorites'}
+            iconIndex={0}
+            onClick={() => setActiveFilter('favorites')}
+          />
+          {visibleCategories.map((folder, index) => (
+            <CategoryCard
+              key={folder.id}
+              title={folder.name}
+              count={counts.get(folder.id) || 0}
+              active={activeFilter === 'folder' && selectedFolderId === folder.id}
+              iconIndex={index + 1}
+              onClick={() => {
+                setActiveFilter('folder')
+                setSelectedFolderId(folder.id)
+              }}
+              onEdit={(event) => {
+                event.stopPropagation()
+                openEditModal(folder)
+              }}
+              onDelete={(event) => {
+                event.stopPropagation()
+                void deleteFolder(folder.id)
+              }}
+            />
+          ))}
+          {!folders.length ? (
+            <button type="button" className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#ddc1b3] bg-white text-sm font-semibold text-[#974400]" onClick={openCreateModal}>
+              <FolderPlus size={24} />
+              Create Category
             </button>
-            <button type="button" aria-label="카테고리 삭제" className="grid h-10 w-10 place-items-center rounded-full bg-white text-red-700" onClick={() => void deleteFolder(selectedFolder.id)}>
-              <Trash2 size={17} />
+          ) : null}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{activeTitle}</h2>
+          <div className="flex items-center gap-2">
+            {activeFilter !== 'all' ? (
+              <button type="button" className="min-h-10 rounded-full bg-[#f0eded] px-3 text-xs font-semibold text-[#564338]" onClick={() => { setActiveFilter('all'); setSelectedFolderId('') }}>
+                Clear
+              </button>
+            ) : null}
+            <button type="button" aria-label="Filter recipes" className="grid h-10 w-10 place-items-center rounded-full text-[#8a7266] transition hover:bg-[#e4e2e1]">
+              <Filter size={21} />
             </button>
           </div>
         </div>
-      ) : null}
 
-      {error ? <ErrorState message={error} /> : null}
-      {!displayedRecipes.length ? <EmptyState title={emptyCopy.title} description={emptyCopy.description} /> : null}
+        {error ? <ErrorState message={error} /> : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {displayedRecipes.map((recipe) => <RecipeBookCard key={recipe.id} recipe={recipe} />)}
-      </div>
+        {!displayedRecipes.length ? (
+          <EmptyState
+            title={query ? 'No matching recipes.' : 'No recipes found.'}
+            description={query ? 'Try a different search term or clear the active category.' : 'Add recipes, mark favorites, or place recipes in categories to build your book.'}
+          />
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {displayedRecipes.map((recipe) => <RecipeBookCard key={recipe.id} recipe={recipe} />)}
+        </div>
+      </section>
 
       <button
         type="button"
         onClick={openCreateModal}
-        className="fixed bottom-24 right-6 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-[#9a4022] text-white shadow-lg transition active:scale-90"
-        aria-label="카테고리 만들기"
+        className="fixed bottom-24 right-6 z-20 grid h-14 w-14 place-items-center rounded-2xl bg-[#974400] text-white shadow-xl transition hover:scale-105 active:scale-95"
+        aria-label="Create category"
       >
-        <Plus size={28} />
+        <FolderPlus size={28} />
       </button>
 
       {modalOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-end bg-black/30 px-4 pb-4 sm:place-items-center">
           <form onSubmit={submitFolder} className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h2 className="font-serif text-2xl font-semibold text-[#1e1b18]">{editingId ? '카테고리 수정' : '카테고리 만들기'}</h2>
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-[#f5ece7] text-[#56423c]" onClick={() => setModalOpen(false)} aria-label="닫기">
+              <h2 className="text-[22px] font-semibold leading-7 text-[#1b1c1c]">{editingId ? 'Edit Category' : 'Create Category'}</h2>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-[#f6f3f2] text-[#564338]" onClick={() => setModalOpen(false)} aria-label="Close">
                 <X size={18} />
               </button>
             </div>
             <input
-              className="mt-5 w-full rounded-lg border border-[#dcc1b9] bg-[#fff8f5] px-4 py-3 text-sm outline-none focus:border-[#9a4022]"
-              placeholder="예: 찌개, 볶음밥, 아이반찬"
+              className="mt-5 w-full rounded-lg border border-[#ddc1b3] bg-[#fbf9f8] px-4 py-3 text-sm outline-none focus:border-[#974400]"
+              placeholder="e.g., Quick Dinners, Baking, Holiday Classics"
               value={name}
               onChange={(event) => setName(event.target.value)}
               autoFocus
             />
             <div className="mt-4 flex gap-2">
-              <Button type="button" variant="secondary" className="flex-1" onClick={() => setModalOpen(false)}>취소</Button>
-              <Button disabled={!name.trim()} className="flex-1">{editingId ? '수정하기' : '만들기'}</Button>
+              <Button type="button" variant="secondary" className="flex-1" onClick={() => setModalOpen(false)}>Cancel</Button>
+              <Button disabled={!name.trim()} className="flex-1">{editingId ? 'Save' : 'Create'}</Button>
             </div>
           </form>
         </div>
