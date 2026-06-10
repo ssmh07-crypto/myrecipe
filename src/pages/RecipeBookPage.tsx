@@ -56,38 +56,38 @@ const RecipeBookCard = ({ recipe }: { recipe: Recipe }) => (
 )
 
 const RecipeSearchRow = ({ recipe }: { recipe: Recipe }) => (
-  <Link to={`/recipes/${recipe.id}`} className="group flex flex-col gap-6 border-b border-[#ddc1b3] bg-[#fbf9f8] pb-8 transition active:scale-[0.99] last:border-0 md:flex-row">
-    <div className="relative h-56 w-full shrink-0 overflow-hidden rounded-xl bg-[#e4e2e1] md:w-56">
+  <Link
+    to={`/recipes/${recipe.id}`}
+    className="group flex min-h-24 gap-3 bg-white p-2 transition hover:bg-[#f6f3f2] focus:outline-none focus:ring-2 focus:ring-[#974400] active:scale-[0.99]"
+  >
+    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-[#e4e2e1]">
       {recipe.image_url ? (
-        <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-110" />
+        <img src={recipe.image_url} alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
       ) : (
         <div className="grid h-full w-full place-items-center text-[#1b1c1c]">
-          <Utensils size={46} />
+          <Utensils size={26} />
         </div>
       )}
       {recipe.is_favorite ? (
-        <div className="absolute right-3 top-3 rounded-md bg-white/90 px-2 py-1 text-[#ba1a1a] shadow-sm backdrop-blur">
-          <Heart size={18} fill="currentColor" />
+        <div className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded bg-white/90 text-[#ba1a1a] shadow-sm backdrop-blur">
+          <Heart size={14} fill="currentColor" />
         </div>
       ) : null}
     </div>
-    <div className="flex flex-col justify-center gap-2 rounded-xl bg-white p-4 shadow-[0_4px_12px_rgba(0,0,0,0.04)] md:flex-1">
-      <div className="flex items-center gap-2">
-        <span className="rounded-md bg-[#eeeeee] px-2 py-0.5 text-xs font-medium text-[#4c4546]">{sourceLabel(recipe)}</span>
-        <div className="flex items-center gap-1 text-[#4c4546]">
-          <Star size={14} fill="currentColor" />
-          <span className="text-xs font-medium">{recipe.is_favorite ? 'Saved' : 'Recipe'}</span>
-        </div>
+    <div className="flex min-w-0 flex-1 flex-col justify-center">
+      <h2 className="truncate text-sm font-semibold leading-5 text-[#1b1b1b]">{recipe.title}</h2>
+      <div className="mt-1 flex min-w-0 items-center gap-3 text-xs font-medium text-[#564338]">
+        <span className="inline-flex shrink-0 items-center gap-1">
+          <Utensils size={14} />
+          {normalizeDifficultyLabel(recipe.difficulty)}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1">
+          {recipe.servings || 0} servings
+        </span>
       </div>
-      <h2 className="text-2xl font-semibold leading-tight text-[#1b1b1b] group-hover:underline">{recipe.title}</h2>
-      <div className="flex items-center gap-4 text-[#4c4546]">
-        <div className="flex items-center gap-1">
-          <Utensils size={18} />
-          <span className="text-xs font-medium">{normalizeDifficultyLabel(recipe.difficulty)}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs font-medium">{recipe.servings || 0} servings</span>
-        </div>
+      <div className="mt-1 flex items-center gap-2 text-xs font-medium text-[#8a7266]">
+        <span className="rounded bg-[#eeeeee] px-1.5 py-0.5">{sourceLabel(recipe)}</span>
+        <span>{recipe.is_favorite ? 'Saved' : 'Recipe'}</span>
       </div>
     </div>
   </Link>
@@ -392,7 +392,7 @@ export const RecipeBookPage = () => {
           />
         ) : null}
 
-        <div className="flex flex-col gap-8">
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded border border-[#ddc1b3] bg-[#ddc1b3] md:grid-cols-2">
           {displayedRecipes.map((recipe, index) => (
             <div key={recipe.id} ref={index === 0 ? (element) => { firstResultRef.current = element?.querySelector('a') || null } : undefined}>
               <RecipeSearchRow recipe={recipe} />
