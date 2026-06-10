@@ -26,7 +26,7 @@ const ListSection = ({ title, items }: { title: string; items: string[] }) => (
         <li key={`${item}-${index}`} className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-base leading-6 text-[#1b1c1c]">
           {item}
         </li>
-      )) : <li className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">작성된 항목이 없습니다.</li>}
+      )) : <li className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">No items yet.</li>}
     </ul>
   </section>
 )
@@ -43,7 +43,7 @@ const SeasoningSection = ({ items }: { items: Recipe['seasonings'] }) => (
             {amount ? <span className="shrink-0 text-sm font-semibold text-[#564338]">{amount}</span> : null}
           </li>
         )
-      }) : <li className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">작성된 항목이 없습니다.</li>}
+      }) : <li className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">No items yet.</li>}
     </ul>
   </section>
 )
@@ -114,7 +114,7 @@ export const RecipeDetailPage = () => {
 
   if (loading) return <main className="min-h-screen bg-[#fff8f5] p-4"><LoadingState /></main>
   if (error && !recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message={error} /></main>
-  if (!recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message="레시피를 찾을 수 없습니다." /></main>
+  if (!recipe) return <main className="min-h-screen bg-[#fff8f5] p-4"><ErrorState message="Recipe not found." /></main>
 
   const ingredients = recipe.ingredients.map((item) => formatIngredientItems([item]))
 
@@ -129,11 +129,11 @@ export const RecipeDetailPage = () => {
           </div>
         )}
         <div className="no-print absolute left-0 top-0 z-10 flex w-full items-center justify-between p-4">
-          <button type="button" aria-label="뒤로" className={glassButton} onClick={() => navigate(-1)}>
+          <button type="button" aria-label="Back" className={glassButton} onClick={() => navigate(-1)}>
             <ArrowLeft size={22} />
           </button>
           <div className="relative">
-            <button type="button" aria-label="더 보기" className={glassButton} onClick={() => setMoreOpen((value) => !value)}>
+            <button type="button" aria-label="More" className={glassButton} onClick={() => setMoreOpen((value) => !value)}>
               <MoreHorizontal size={23} />
             </button>
             {moreOpen ? (
@@ -214,7 +214,7 @@ export const RecipeDetailPage = () => {
                     ) : null}
                   </div>
                 </div>
-              )) : <p className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">작성된 조리순서가 없습니다.</p>}
+              )) : <p className="rounded-lg border border-[#e4e2e1]/60 bg-white p-4 text-sm text-[#564338]">No instructions yet.</p>}
             </div>
           </section>
 
@@ -222,7 +222,7 @@ export const RecipeDetailPage = () => {
             <footer className="border-t border-[#e4e2e1]/60 pt-6 text-center">
               <a href={recipe.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1 text-sm font-semibold text-[#5c5c5c]">
                 <ExternalLink size={16} />
-                원본 레시피 보기
+                View Original Recipe
               </a>
             </footer>
           ) : null}
@@ -241,25 +241,25 @@ export const RecipeDetailPage = () => {
             onClick={() => setFolderOpen(true)}
           >
             <Plus size={22} />
-            Add Recipe
+            Change Category
           </button>
         </div>
       </div>
 
-      <ConfirmDialog open={confirmOpen} title="레시피 삭제" description="삭제한 레시피는 되돌릴 수 없습니다." onCancel={() => setConfirmOpen(false)} onConfirm={deleteRecipe} />
+      <ConfirmDialog open={confirmOpen} title="Delete Recipe" description="Deleted recipes cannot be restored." onCancel={() => setConfirmOpen(false)} onConfirm={deleteRecipe} />
       {folderOpen ? (
         <div className="fixed inset-0 z-50 flex items-end bg-black/30 p-4 sm:items-center sm:justify-center">
           <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
-            <h2 className="text-lg font-bold text-stone-950">레시피북에 담기</h2>
+            <h2 className="text-lg font-bold text-stone-950">Change Category</h2>
             <div className="mt-4 space-y-2">
               {folders.length ? folders.map((folder) => (
                 <label key={folder.id} className="flex min-h-11 items-center justify-between rounded-lg border border-amber-100 px-3 text-sm font-semibold text-stone-800">
                   {folder.name}
                   <input type="checkbox" checked={selectedFolderIds.includes(folder.id)} onChange={() => void toggleFolder(folder.id)} />
                 </label>
-              )) : <p className="rounded-lg bg-amber-50 p-3 text-sm text-stone-600">레시피북 탭에서 폴더를 먼저 만들어 주세요.</p>}
+              )) : <p className="rounded-lg bg-amber-50 p-3 text-sm text-stone-600">Create a category in the Book tab first.</p>}
             </div>
-            <Button type="button" className="mt-4 w-full" onClick={() => setFolderOpen(false)}>완료</Button>
+            <Button type="button" className="mt-4 w-full" onClick={() => setFolderOpen(false)}>Done</Button>
           </div>
         </div>
       ) : null}

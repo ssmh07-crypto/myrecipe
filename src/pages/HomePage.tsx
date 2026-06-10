@@ -25,11 +25,11 @@ const RecentRecipeTile = ({ recipe }: { recipe: Recipe }) => (
       <h3 className="truncate text-sm font-semibold text-[#1b1c1c]">{recipe.title}</h3>
       <div className="flex items-center gap-2 text-xs font-medium text-[#564338]">
         <span className="inline-flex items-center gap-1 whitespace-nowrap">
-          <Signal size={14} /> {recipe.difficulty || '난이도 미정'}
+          <Signal size={14} /> {recipe.difficulty || 'Unrated'}
         </span>
         <span>·</span>
         <span className="inline-flex items-center gap-1 whitespace-nowrap">
-          <Users size={14} /> {recipe.servings || 0}인분
+          <Users size={14} /> {recipe.servings || 0} servings
         </span>
       </div>
     </div>
@@ -88,14 +88,14 @@ export const HomePage = () => {
         ])
 
         if (recipeResult.error || itemResult.error) {
-          throw new Error(recipeResult.error?.message || itemResult.error?.message || '홈을 불러오지 못했습니다.')
+          throw new Error(recipeResult.error?.message || itemResult.error?.message || 'Failed to load home.')
         }
 
         setFolders(nextFolders)
         setFolderItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
         setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : '홈을 불러오지 못했습니다.')
+        setError(nextError instanceof Error ? nextError.message : 'Failed to load home.')
       } finally {
         setLoading(false)
       }
@@ -127,7 +127,7 @@ export const HomePage = () => {
       <button
         type="button"
         className="flex min-h-11 w-full items-center gap-4 rounded-xl bg-[#e4e2e1] px-4 text-left text-base text-[#564338] transition focus:outline-none focus:ring-2 focus:ring-[#974400]"
-        onClick={() => navigate('/recipe-books')}
+        onClick={() => navigate('/recipe-books?search=1')}
       >
         <Search size={22} className="text-[#8a7266]" />
         <span>Search your recipes...</span>
@@ -143,9 +143,9 @@ export const HomePage = () => {
         {loading ? <LoadingState /> : null}
         {!loading && !recipes.length ? (
           <EmptyState
-            title={user ? '아직 저장된 레시피가 없습니다.' : '비회원으로 둘러보는 중입니다.'}
-            description={user ? '직접 작성하거나 링크로 첫 레시피를 가져와 보세요.' : '레시피 저장, 링크 가져오기, 레시피북 기능은 로그인 후 사용할 수 있습니다.'}
-            action={<Link to={user ? '/recipes/add' : '/login'}><Button>{user ? '첫 레시피 추가' : '로그인하기'}</Button></Link>}
+            title={user ? 'No saved recipes yet.' : 'Browsing as a guest.'}
+            description={user ? 'Create one manually or import your first recipe from a link.' : 'Sign in to save recipes, import from links, and use your recipe book.'}
+            action={<Link to={user ? '/recipes/add' : '/login'}><Button>{user ? 'Add First Recipe' : 'Sign In'}</Button></Link>}
           />
         ) : null}
         <div className="no-scrollbar -mx-4 flex gap-4 overflow-x-auto px-4 pb-1">
@@ -168,16 +168,16 @@ export const HomePage = () => {
         ) : null}
         {!loading && !user ? (
           <EmptyState
-            title="로그인 후 카테고리를 사용할 수 있습니다."
-            description="Chicken, MEAT, FISH, PASTA 기본 카테고리는 로그인 후 자동으로 만들어집니다."
-            action={<Link to="/login"><Button>로그인하기</Button></Link>}
+            title="Sign in to use categories."
+            description="Default categories such as Chicken, MEAT, FISH, and PASTA are created automatically after sign-in."
+            action={<Link to="/login"><Button>Sign In</Button></Link>}
           />
         ) : null}
       </section>
 
       <button
         type="button"
-        aria-label="레시피 추가"
+        aria-label="Add recipe"
         className="fixed bottom-24 right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-[#9a4022] text-white shadow-xl active:scale-95 md:hidden"
         onClick={() => navigate(user ? '/recipes/add' : '/login')}
       >

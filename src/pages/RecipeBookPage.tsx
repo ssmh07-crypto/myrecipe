@@ -1,6 +1,6 @@
-import { ArrowLeft, CakeSlice, CalendarDays, Edit, FolderPlus, Heart, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
+import { ArrowLeft, CakeSlice, CalendarDays, Edit, FolderPlus, Heart, ImagePlus, Search, Star, Timer, Trash2, Utensils, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, MouseEvent } from 'react'
+import type { ChangeEvent, FormEvent, MouseEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/State'
@@ -11,7 +11,7 @@ import { normalizeRecipe } from '../lib/recipes'
 import { supabase } from '../lib/supabaseClient'
 import type { Recipe, RecipeFolder } from '../types/recipe'
 
-type BookFilter = 'all' | 'favorites' | 'folder'
+type BookFilter = 'all' | 'favorites' | 'folder' | 'search'
 
 const folderIconStyles = [
   { icon: Heart, bg: 'bg-[#ffdbc9]', color: 'text-[#974400]' },
@@ -176,7 +176,6 @@ export const RecipeBookPage = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const bookSearchRef = useRef<HTMLInputElement | null>(null)
   const scopedSearchRef = useRef<HTMLInputElement | null>(null)
   const firstResultRef = useRef<HTMLAnchorElement | null>(null)
 
@@ -197,10 +196,14 @@ export const RecipeBookPage = () => {
       setItems((itemResult.data || []) as { folder_id: string; recipe_id: string }[])
       setRecipes((recipeResult.data || []).map((recipe) => normalizeRecipe(recipe as Recipe)))
       const folderParam = searchParams.get('folder')
+      const searchMode = searchParams.get('search') === '1'
       const folderFromQuery = folderParam ? nextFolders.find((folder) => folder.id === folderParam) : null
       if (folderFromQuery) {
         setActiveFilter('folder')
         setSelectedFolderId(folderFromQuery.id)
+      } else if (searchMode) {
+        setActiveFilter('search')
+        setSelectedFolderId('')
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to load recipe book.')
@@ -294,6 +297,22 @@ export const RecipeBookPage = () => {
     if (notice) setError(notice)
   }
 
+  const handleFolderImageFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image file.')
+      event.target.value = ''
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setImageUrl(reader.result)
+    }
+    reader.readAsDataURL(file)
+    event.target.value = ''
+  }
+
   const deleteFolder = async (folderId: string) => {
     if (!window.confirm('Delete this category? Recipes will not be deleted.')) return
     setError('')
@@ -315,9 +334,11 @@ export const RecipeBookPage = () => {
     ? 'Favorites'
     : activeFilter === 'folder'
       ? folders.find((folder) => folder.id === selectedFolderId)?.name || 'Category Recipes'
-      : 'All Recipes'
+      : activeFilter === 'search'
+        ? 'Search'
+        : 'All Recipes'
   const editingFolder = folders.find((folder) => folder.id === editingId)
-  const folderPreviewImage = imageUrl || (editingFolder ? getFolderImage(editingFolder).image : '')
+  const folderPreviewImage = imageUrl || (editingFolder ? getFolderImage(editingFolder).image : getFolderImage({ name: name || 'Category', image_url: '' }).image)
 
   const submitSearch = (input: HTMLInputElement | null) => {
     input?.blur()
@@ -351,7 +372,7 @@ export const RecipeBookPage = () => {
             <input
               ref={scopedSearchRef}
               className="w-full rounded-lg border-none bg-[#f3f3f3] py-4 pl-12 pr-4 text-base text-[#1b1b1b] outline-none transition placeholder:text-[#4c4546]/60 focus:ring-1 focus:ring-[#1b1b1b]"
-              placeholder={`Search in ${activeTitle}`}
+              placeholder={activeFilter === 'search' ? 'Search recipes, ingredients, or tags...' : `Search in ${activeTitle}`}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -367,7 +388,7 @@ export const RecipeBookPage = () => {
         {!displayedRecipes.length ? (
           <EmptyState
             title={query ? 'No matching recipes.' : `No recipes in ${activeTitle}.`}
-            description={query ? 'Try another keyword inside this category.' : 'Add recipes to this category from a recipe detail page.'}
+            description={query ? 'Try another keyword.' : activeFilter === 'search' ? 'Add recipes to make them searchable here.' : 'Add recipes to this category from a recipe detail page.'}
           />
         ) : null}
 
@@ -384,20 +405,17 @@ export const RecipeBookPage = () => {
 
   return (
     <section className="mx-auto max-w-2xl space-y-8 pb-8">
-      <div className="relative w-full">
-        <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8a7266]" />
-        <input
-          ref={bookSearchRef}
-          className="h-11 w-full rounded-xl border-none bg-[#e4e2e1] pl-12 pr-4 text-base leading-6 text-[#1b1c1c] outline-none transition placeholder:text-[#8a7266] focus:ring-2 focus:ring-[#974400]"
-          placeholder="Search your recipes..."
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submitSearch(bookSearchRef.current)
-          }}
-        />
-      </div>
+      <button
+        type="button"
+        className="flex h-11 w-full items-center gap-4 rounded-xl bg-[#e4e2e1] px-4 text-left text-base leading-6 text-[#8a7266] transition focus:outline-none focus:ring-2 focus:ring-[#974400]"
+        onClick={() => {
+          setActiveFilter('search')
+          setQuery('')
+        }}
+      >
+        <Search size={22} className="text-[#8a7266]" />
+        <span>Search your recipes...</span>
+      </button>
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">
@@ -506,11 +524,21 @@ export const RecipeBookPage = () => {
                 value={imageUrl}
                 onChange={(event) => setImageUrl(event.target.value)}
               />
-              {folderPreviewImage ? (
-                <div className="h-32 overflow-hidden rounded-lg bg-[#e4e2e1]">
-                  <img src={folderPreviewImage} alt="" className="h-full w-full object-cover" />
-                </div>
-              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#ddc1b3] bg-white px-3 text-sm font-semibold text-[#1b1c1c] transition active:scale-95">
+                  <ImagePlus size={17} />
+                  Choose Local Image
+                  <input className="hidden" type="file" accept="image/*" onChange={handleFolderImageFile} />
+                </label>
+                {imageUrl ? (
+                  <button type="button" className="h-10 rounded-lg bg-[#f6f3f2] px-3 text-sm font-semibold text-[#564338]" onClick={() => setImageUrl('')}>
+                    Use Example Image
+                  </button>
+                ) : null}
+              </div>
+              <div className="h-32 overflow-hidden rounded-lg bg-[#e4e2e1]">
+                <img src={folderPreviewImage} alt="" className="h-full w-full object-cover" />
+              </div>
             </div>
             <div className="mt-4 flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setModalOpen(false)}>Cancel</Button>
