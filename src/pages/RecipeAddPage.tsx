@@ -91,7 +91,7 @@ const RecipeAddContent = () => {
 
       <div className="grid gap-4">
         <OptionCard
-          to={importEnabled ? '/recipes/import' : '/premium'}
+          to="/recipes/import"
           icon={importEnabled ? Link2 : Lock}
           title="Import from Link"
           description={importEnabled ? 'Extract a recipe from a blog or website and review it before saving.' : 'Unlock link import to extract recipes from your favorite blogs and websites.'}
