@@ -32,10 +32,12 @@ create table if not exists public.recipes (
   servings integer,
   difficulty text default '쉬움',
   image_url text,
+  image_path text,
   ingredients jsonb default '[]'::jsonb,
   seasonings jsonb default '[]'::jsonb,
   steps_text text,
   step_images jsonb default '[]'::jsonb,
+  step_image_paths jsonb default '[]'::jsonb,
   memo text,
   source_url text,
   source_type text default 'manual' not null,
@@ -47,10 +49,12 @@ create table if not exists public.recipes (
 alter table public.recipes add column if not exists servings integer;
 alter table public.recipes add column if not exists difficulty text default '쉬움';
 alter table public.recipes add column if not exists image_url text;
+alter table public.recipes add column if not exists image_path text;
 alter table public.recipes add column if not exists ingredients jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists seasonings jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists steps_text text;
 alter table public.recipes add column if not exists step_images jsonb default '[]'::jsonb;
+alter table public.recipes add column if not exists step_image_paths jsonb default '[]'::jsonb;
 alter table public.recipes add column if not exists memo text;
 alter table public.recipes add column if not exists source_url text;
 alter table public.recipes add column if not exists source_type text default 'manual';
@@ -104,6 +108,43 @@ update public.recipes
 set source_type = 'manual'
 where source_type is null or source_type = '';
 
+update public.recipes set difficulty = 'Easy' where difficulty = '쉬움' or difficulty is null or difficulty = '';
+update public.recipes set difficulty = 'Medium' where difficulty = '보통';
+update public.recipes set difficulty = 'Hard' where difficulty = '어려움';
+
+update public.recipes
+set image_path = split_part(image_url, '/storage/v1/object/public/recipe-images/', 2),
+    image_url = null
+where image_path is null
+  and image_url like '%/storage/v1/object/public/recipe-images/%';
+
+update public.recipes
+set step_image_paths = (
+      select coalesce(jsonb_agg(
+        case
+          when value like '%/storage/v1/object/public/recipe-images/%'
+            then to_jsonb(split_part(value, '/storage/v1/object/public/recipe-images/', 2))
+          else '""'::jsonb
+        end order by ordinality
+      ), '[]'::jsonb)
+      from jsonb_array_elements_text(coalesce(step_images, '[]'::jsonb)) with ordinality
+    ),
+    step_images = (
+      select coalesce(jsonb_agg(
+        case
+          when value like '%/storage/v1/object/public/recipe-images/%' then '""'::jsonb
+          else to_jsonb(value)
+        end order by ordinality
+      ), '[]'::jsonb)
+      from jsonb_array_elements_text(coalesce(step_images, '[]'::jsonb)) with ordinality
+    )
+where jsonb_typeof(coalesce(step_images, '[]'::jsonb)) = 'array'
+  and exists (
+    select 1
+    from jsonb_array_elements_text(coalesce(step_images, '[]'::jsonb)) as image(value)
+    where value like '%/storage/v1/object/public/recipe-images/%'
+  );
+
 alter table public.recipes
 alter column source_type set default 'manual';
 
@@ -116,6 +157,19 @@ drop constraint if exists recipes_source_type_check;
 alter table public.recipes
 add constraint recipes_source_type_check
 check (source_type in ('manual', 'imported'));
+
+alter table public.recipes drop constraint if exists recipes_content_check;
+alter table public.recipes add constraint recipes_content_check check (
+  char_length(trim(title)) between 1 and 200
+  and servings between 1 and 100
+  and difficulty in ('Easy', 'Medium', 'Hard')
+  and jsonb_typeof(ingredients) = 'array'
+  and jsonb_typeof(seasonings) = 'array'
+  and jsonb_typeof(step_images) = 'array'
+  and jsonb_typeof(step_image_paths) = 'array'
+  and char_length(coalesce(steps_text, '')) <= 50000
+  and char_length(coalesce(memo, '')) <= 10000
+) not valid;
 
 alter table public.recipes drop column if exists description;
 alter table public.recipes drop column if exists cooking_time;
@@ -137,6 +191,10 @@ create table if not exists public.recipe_folders (
 
 alter table public.recipe_folders add column if not exists image_url text;
 
+alter table public.recipe_folders drop constraint if exists recipe_folders_name_check;
+alter table public.recipe_folders add constraint recipe_folders_name_check
+check (char_length(trim(name)) between 1 and 100) not valid;
+
 create table if not exists public.recipe_folder_items (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) not null,
@@ -145,11 +203,29 @@ create table if not exists public.recipe_folder_items (
   created_at timestamptz default now()
 );
 
+alter table public.recipes drop constraint if exists recipes_user_id_fkey;
+alter table public.recipes add constraint recipes_user_id_fkey
+foreign key (user_id) references auth.users(id) on delete cascade;
+
+alter table public.recipe_folders drop constraint if exists recipe_folders_user_id_fkey;
+alter table public.recipe_folders add constraint recipe_folders_user_id_fkey
+foreign key (user_id) references auth.users(id) on delete cascade;
+
+alter table public.recipe_folder_items drop constraint if exists recipe_folder_items_user_id_fkey;
+alter table public.recipe_folder_items add constraint recipe_folder_items_user_id_fkey
+foreign key (user_id) references auth.users(id) on delete cascade;
+
 alter table public.recipe_folder_items
 drop constraint if exists recipe_folder_items_folder_id_recipe_id_key;
 
+delete from public.recipe_folder_items a
+using public.recipe_folder_items b
+where a.id > b.id
+  and a.user_id = b.user_id
+  and a.recipe_id = b.recipe_id;
+
 alter table public.recipe_folder_items
-add constraint recipe_folder_items_folder_id_recipe_id_key unique (folder_id, recipe_id);
+add constraint recipe_folder_items_folder_id_recipe_id_key unique (user_id, recipe_id);
 
 drop table if exists public.ai_suggestions;
 
@@ -159,7 +235,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path = '';
 
 drop trigger if exists recipes_set_updated_at on public.recipes;
 create trigger recipes_set_updated_at
@@ -179,7 +255,7 @@ begin
   on conflict (id) do nothing;
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = '';
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -206,6 +282,9 @@ create policy "profiles_update_own"
 on public.profiles for update
 using (auth.uid() = id)
 with check (auth.uid() = id);
+
+revoke update on public.profiles from anon, authenticated;
+grant update (display_name) on public.profiles to authenticated;
 
 drop policy if exists "recipes_select_own" on public.recipes;
 create policy "recipes_select_own"
@@ -257,7 +336,19 @@ using (auth.uid() = user_id);
 drop policy if exists "recipe_folder_items_insert_own" on public.recipe_folder_items;
 create policy "recipe_folder_items_insert_own"
 on public.recipe_folder_items for insert
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.recipe_folders as owned_folder
+    where owned_folder.id = recipe_folder_items.folder_id
+      and owned_folder.user_id = auth.uid()
+  )
+  and exists (
+    select 1 from public.recipes as owned_recipe
+    where owned_recipe.id = recipe_folder_items.recipe_id
+      and owned_recipe.user_id = auth.uid()
+  )
+);
 
 drop policy if exists "recipe_folder_items_delete_own" on public.recipe_folder_items;
 create policy "recipe_folder_items_delete_own"
@@ -265,13 +356,17 @@ on public.recipe_folder_items for delete
 using (auth.uid() = user_id);
 
 insert into storage.buckets (id, name, public)
-values ('recipe-images', 'recipe-images', true)
-on conflict (id) do update set public = true;
+values ('recipe-images', 'recipe-images', false)
+on conflict (id) do update set public = false;
 
 drop policy if exists "recipe_images_public_read" on storage.objects;
-create policy "recipe_images_public_read"
+drop policy if exists "recipe_images_select_own" on storage.objects;
+create policy "recipe_images_select_own"
 on storage.objects for select
-using (bucket_id = 'recipe-images');
+using (
+  bucket_id = 'recipe-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
 
 drop policy if exists "recipe_images_insert_own" on storage.objects;
 create policy "recipe_images_insert_own"
@@ -300,5 +395,124 @@ using (
   bucket_id = 'recipe-images'
   and auth.uid()::text = (storage.foldername(name))[1]
 );
+
+create table if not exists public.meal_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  client_id text not null,
+  meal_date date not null,
+  entry_type text not null,
+  recipe_id uuid references public.recipes(id) on delete set null,
+  title text not null,
+  note text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  constraint meal_entries_entry_type_check check (entry_type in ('recipe', 'manual')),
+  constraint meal_entries_user_client_key unique (user_id, client_id)
+);
+
+alter table public.meal_entries drop constraint if exists meal_entries_content_check;
+alter table public.meal_entries add constraint meal_entries_content_check check (
+  char_length(client_id) between 1 and 100
+  and char_length(trim(title)) between 1 and 200
+  and char_length(coalesce(note, '')) <= 2000
+) not valid;
+
+create index if not exists meal_entries_user_date_idx
+on public.meal_entries (user_id, meal_date);
+
+drop trigger if exists meal_entries_set_updated_at on public.meal_entries;
+create trigger meal_entries_set_updated_at
+before update on public.meal_entries
+for each row execute function public.set_updated_at();
+
+alter table public.meal_entries enable row level security;
+
+drop policy if exists "meal_entries_select_own" on public.meal_entries;
+create policy "meal_entries_select_own"
+on public.meal_entries for select
+using (auth.uid() = user_id);
+
+drop policy if exists "meal_entries_insert_own" on public.meal_entries;
+create policy "meal_entries_insert_own"
+on public.meal_entries for insert
+with check (
+  auth.uid() = user_id
+  and (
+    recipe_id is null
+    or exists (
+      select 1 from public.recipes as owned_recipe
+      where owned_recipe.id = meal_entries.recipe_id
+        and owned_recipe.user_id = auth.uid()
+    )
+  )
+);
+
+drop policy if exists "meal_entries_update_own" on public.meal_entries;
+create policy "meal_entries_update_own"
+on public.meal_entries for update
+using (auth.uid() = user_id)
+with check (
+  auth.uid() = user_id
+  and (
+    recipe_id is null
+    or exists (
+      select 1 from public.recipes as owned_recipe
+      where owned_recipe.id = meal_entries.recipe_id
+        and owned_recipe.user_id = auth.uid()
+    )
+  )
+);
+
+drop policy if exists "meal_entries_delete_own" on public.meal_entries;
+create policy "meal_entries_delete_own"
+on public.meal_entries for delete
+using (auth.uid() = user_id);
+
+create index if not exists recipes_user_created_idx on public.recipes (user_id, created_at desc);
+create index if not exists recipe_folders_user_created_idx on public.recipe_folders (user_id, created_at);
+create index if not exists recipe_folder_items_user_recipe_idx on public.recipe_folder_items (user_id, recipe_id);
+
+create table if not exists public.recipe_import_usage (
+  id bigint generated by default as identity primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists recipe_import_usage_user_created_idx
+on public.recipe_import_usage (user_id, created_at desc);
+
+alter table public.recipe_import_usage enable row level security;
+revoke all on public.recipe_import_usage from anon, authenticated;
+
+create or replace function public.consume_recipe_import_quota(p_user_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  daily_count integer;
+  monthly_count integer;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
+
+  select count(*) filter (where created_at >= now() - interval '1 day'),
+         count(*) filter (where created_at >= now() - interval '30 days')
+    into daily_count, monthly_count
+  from public.recipe_import_usage
+  where user_id = p_user_id
+    and created_at >= now() - interval '30 days';
+
+  if daily_count >= 10 then return 'daily_limit'; end if;
+  if monthly_count >= 100 then return 'monthly_limit'; end if;
+
+  insert into public.recipe_import_usage (user_id) values (p_user_id);
+  return 'ok';
+end;
+$$;
+
+revoke all on function public.consume_recipe_import_quota(uuid) from public, anon, authenticated;
+grant execute on function public.consume_recipe_import_quota(uuid) to service_role;
 
 notify pgrst, 'reload schema';

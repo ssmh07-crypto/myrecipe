@@ -1,120 +1,77 @@
 # My Recipe Note
 
-인터넷 레시피를 내 레시피북으로 저장하는 모바일 레시피 아카이브 MVP입니다. 직접 작성한 레시피는 무료 저장 흐름으로 운영하고, AI는 권한이 있는 웹 레시피 URL을 개인 레시피 초안으로 정리할 때만 사용합니다.
+Expo와 React Native로 만든 네이티브 모바일 레시피 보관 앱입니다. 웹 프런트엔드는 제공하지 않으며 Android/iOS 앱이 Supabase와 Cloudflare API를 사용합니다.
 
-## 기술스택
+## 구성
 
-- React + Vite + TypeScript
-- Tailwind CSS
-- React Router
-- Supabase Auth / Database / RLS / Storage
-- OpenAI API
-- Cloudflare Pages
-- Cloudflare Pages Functions
+- `apps/mobile`: Expo / React Native 앱
+- `functions/api/import-recipe.ts`: Cloudflare Pages Functions URL 가져오기 API
+- `supabase/schema.sql`: Auth, Database, RLS, Storage 스키마
+- `docs`: 출시 체크리스트와 개인정보처리방침
 
-## 설치
+## 모바일 앱 실행
 
 ```bash
-npm install
+npm --prefix apps/mobile install
+npm start
 ```
 
-## 로컬 실행
-
-```bash
-npm run dev
-```
+루트의 `npm start`는 원격 개발 환경에서 Expo 터널을 사용합니다. 로컬 네트워크에서는 `cd apps/mobile && npm start`를 사용할 수 있습니다. Expo SDK 56용 Expo Go 또는 EAS 개발 빌드에서 실행합니다.
 
 ## 환경변수
 
-클라이언트 노출 가능:
+`apps/mobile/.env`:
 
 ```txt
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+EXPO_PUBLIC_SUPABASE_URL=...
+EXPO_PUBLIC_SUPABASE_ANON_KEY=...
+EXPO_PUBLIC_API_BASE_URL=https://myrecipe-1im.pages.dev
 ```
 
-Cloudflare Pages Functions 전용:
+Cloudflare Pages Functions 서버 전용:
 
 ```txt
 OPENAI_API_KEY=...
+SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
-`OPENAI_API_KEY`와 `SUPABASE_SERVICE_ROLE_KEY`에는 절대 `VITE_`를 붙이지 않습니다.
+서버 전용 키에는 `EXPO_PUBLIC_`을 붙이지 않습니다.
 
-## Supabase SQL
+## Supabase
 
-Supabase SQL Editor에서 [supabase/schema.sql](supabase/schema.sql)을 실행합니다.
-
-생성/관리되는 테이블:
+Supabase SQL Editor에서 `supabase/schema.sql`을 실행합니다. 관리되는 테이블:
 
 - `profiles`
 - `recipes`
 - `recipe_folders`
 - `recipe_folder_items`
+- `meal_entries`
 
-`ai_suggestions`는 이번 MVP에서 제거되었습니다.
+`meal_entries`는 식단 캘린더를 계정 단위로 동기화합니다. 기존 모바일 AsyncStorage 데이터는 로그인 후 첫 로딩 때 자동 업로드되고, 성공하면 로컬 사본이 삭제됩니다. 삭제된 웹 프런트의 브라우저 localStorage는 앱이나 서버가 직접 읽을 수 없으므로 자동 이전 대상이 아닙니다.
 
-## Storage 설정
+인증 세션은 OS 보안 저장소에 분할 저장되며 기존 AsyncStorage 세션은 자동 이전됩니다. 레시피 이미지 버킷은 비공개이고 앱이 로그인 사용자용 단기 서명 URL을 생성합니다. 스키마는 기존 공개 이미지 URL을 비공개 객체 경로로 이전합니다.
 
-SQL 실행 시 `recipe-images` bucket을 생성하고 public read, 사용자별 경로 write/delete 정책을 설정합니다.
+URL 가져오기는 Premium 사용자에게 24시간 기준 10회, 30일 기준 100회로 서버에서 제한됩니다. `recipe_import_usage`는 서비스 역할만 접근할 수 있습니다.
 
-업로드 경로:
-
-```txt
-user_id/recipe_id/filename
-```
-
-프론트에서 허용하는 이미지:
-
-- jpg
-- jpeg
-- png
-- webp
-- 최대 5MB
-
-## RLS
-
-모든 앱 테이블에 Row Level Security를 활성화합니다. `auth.uid() = user_id` 기준으로 사용자는 자신의 레시피, 폴더, 폴더 항목만 접근할 수 있습니다.
-
-## Pages Functions
-
-- `POST /api/import-recipe`
-
-서버가 권한이 있는 블로그와 일반 웹사이트 레시피 URL의 텍스트를 추출하고 OpenAI API로 수정 가능한 레시피 초안을 생성합니다.
-
-영상/SNS 자동 추출, 유료 콘텐츠 우회, 제3자 콘텐츠 다운로드, 원본 저장은 지원하지 않습니다. 출처 URL만 저장합니다.
-
-## Cloudflare Pages 배포
-
-배포 명령:
+## 검증
 
 ```bash
-npm run deploy
+npm run typecheck
+cd apps/mobile && npm exec expo-doctor
 ```
 
-이 명령은 로컬에서 `npm run build`를 먼저 실행하고, 성공하면 `main` 브랜치를 GitHub에 push합니다. GitHub 저장소와 연결된 Cloudflare Pages가 push를 감지해 자동 배포합니다.
-
-배포 링크:
-
-```txt
-https://myrecipe-1im.pages.dev
-```
-
-배포 후 확인:
+## 빌드
 
 ```bash
-npm run deploy:check
+cd apps/mobile
+npm run eas:build:android:preview
+npm run eas:build:android
+npm run eas:build:ios
 ```
 
-빌드 설정:
+## URL 가져오기 API
 
-- Build command: `npm run build`
-- Build output directory: `dist`
-- Functions directory: `functions`
+모바일 앱은 `POST /api/import-recipe`를 호출합니다. Cloudflare Pages 프로젝트는 루트에서 `npm run build`를 실행하고 `dist`를 출력 디렉터리, `functions`를 Functions 디렉터리로 사용합니다. 루트 정적 웹사이트는 제공하지 않습니다.
 
-GitHub 저장소와 Cloudflare Pages 프로젝트를 연결한 뒤 `main` 브랜치에 푸시하면 자동 배포됩니다.
-
-## MVP 제외 기능
-
-AI 수정 기능, AI 제안 기능, 장보기 리스트 생성, 댓글, SNS 피드, 공개 커뮤니티, 결제, 광고, 영양성분 계산, 쇼핑몰 연동, 영상/SNS 자동 추출, 영상 저장, 영상 다운로드는 제외합니다.
+`DELETE /api/delete-account`는 로그인 사용자의 참조 이미지와 Supabase 계정을 삭제합니다. 앱 설정의 계정 영구 삭제에서 호출합니다.

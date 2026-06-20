@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "My Recipe Note",
+    "slug": "my-recipe-note",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "myrecipenote",
+    "userInterfaceStyle": "light",
+    "description": "Save, organize, import, and revisit your personal recipes.",
+    "ios": {
+      "bundleIdentifier": "com.myrecipe.note",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "레시피 대표 이미지를 선택하고 저장하기 위해 사진 보관함 접근이 필요합니다."
+      },
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.myrecipe.note",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF8F5",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "레시피 대표 이미지를 선택하고 저장하기 위해 사진 보관함 접근이 필요합니다.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFF8F5",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store",
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b65e8127-95f9-48b9-a6ac-4e56451f2d12"
+      }
+    },
+    "owner": "ssmh0729"
+  }
+}
