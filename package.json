@@ -7,7 +7,7 @@
     "android": "npm --prefix apps/mobile run android",
     "ios": "npm --prefix apps/mobile run ios",
     "typecheck": "npm --prefix apps/mobile run typecheck && npm --prefix apps/mobile run typecheck:api",
-    "build": "npm run typecheck && node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
+    "build": "npm ci --prefix apps/mobile --ignore-scripts && npm run typecheck && node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
     "deploy:check": "curl --fail --silent --show-error https://myrecipe-1im.pages.dev/api/import-recipe"
   }
 }
