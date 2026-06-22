@@ -35,6 +35,7 @@ const externalTimeoutMs = 10_000
 const aiTimeoutMs = 30_000
 const transcriptPollIntervalMs = 1_500
 const transcriptPollTimeoutMs = 18_000
+const pipelineVersion = 'recipe-import-v3'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -309,6 +310,74 @@ const consumeImportQuota = async (env: Env, userId: string) => {
   if (result !== 'ok') throw new PublicError('가져오기 사용량을 확인하지 못했습니다.', 502)
 }
 
+const canonicalSourceId = (url: URL) => {
+  if (isYouTubeHost(url.hostname)) {
+    const hostname = normalizeHostname(url.hostname)
+    const pathParts = url.pathname.split('/').filter(Boolean)
+    const videoId = hostname === 'youtu.be'
+      ? pathParts[0]
+      : url.searchParams.get('v') || (['shorts', 'embed', 'live'].includes(pathParts[0] || '') ? pathParts[1] : '')
+    if (videoId && /^[a-zA-Z0-9_-]{6,20}$/.test(videoId)) return `youtube:${videoId}`
+  }
+
+  if (isInstagramHost(url.hostname)) {
+    const pathParts = url.pathname.split('/').filter(Boolean)
+    if (['p', 'reel', 'reels', 'tv'].includes(pathParts[0] || '') && /^[a-zA-Z0-9_-]{3,100}$/.test(pathParts[1] || '')) {
+      return `instagram:${pathParts[1]}`
+    }
+  }
+
+  const canonical = new URL(url.toString())
+  canonical.hash = ''
+  canonical.hostname = normalizeHostname(canonical.hostname)
+  for (const key of [...canonical.searchParams.keys()]) {
+    if (/^utm_/i.test(key) || ['fbclid', 'gclid', 'si', 'feature'].includes(key.toLowerCase())) canonical.searchParams.delete(key)
+  }
+  canonical.searchParams.sort()
+  return `web:${canonical.toString()}`
+}
+
+const getImportCacheKey = async (url: URL) => {
+  const bytes = new TextEncoder().encode(canonicalSourceId(url))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const serviceRoleHeaders = (env: Env) => ({
+  apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+  Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+})
+
+const getCachedImport = async (env: Env, cacheKey: string) => {
+  const params = new URLSearchParams({
+    cache_key: `eq.${cacheKey}`,
+    pipeline_version: `eq.${pipelineVersion}`,
+    select: 'result',
+    limit: '1',
+  })
+  const response = await fetchWithTimeout(`${env.SUPABASE_URL}/rest/v1/recipe_import_cache?${params.toString()}`, {
+    headers: serviceRoleHeaders(env),
+  }, externalTimeoutMs)
+  if (!response.ok) throw new PublicError('가져오기 캐시를 확인하지 못했습니다.', 502)
+  const [row] = await response.json() as Array<{ result?: unknown }>
+  if (!row?.result) return null
+  return validateRecipeDraft(normalizeRecipeDraft(row.result))
+}
+
+const cacheImport = async (env: Env, cacheKey: string, recipe: RecipeDraft) => {
+  const params = new URLSearchParams({ on_conflict: 'cache_key,pipeline_version' })
+  const response = await fetchWithTimeout(`${env.SUPABASE_URL}/rest/v1/recipe_import_cache?${params.toString()}`, {
+    method: 'POST',
+    headers: {
+      ...serviceRoleHeaders(env),
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify({ cache_key: cacheKey, pipeline_version: pipelineVersion, result: recipe, updated_at: new Date().toISOString() }),
+  }, externalTimeoutMs)
+  if (!response.ok) throw new PublicError('가져오기 결과를 캐시에 저장하지 못했습니다.', 502)
+}
+
 const fetchExternalPage = async (initialUrl: URL) => {
   let url = initialUrl
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
@@ -532,7 +601,7 @@ const readRequestBody = async (request: Request) => {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
-  if (request.method === 'GET') return json({ status: 'ok', version: 'transcript-v1', transcript_configured: Boolean(env.SUPADATA_API_KEY) })
+  if (request.method === 'GET') return json({ status: 'ok', version: pipelineVersion, transcript_configured: Boolean(env.SUPADATA_API_KEY) })
   if (request.method === 'HEAD') return new Response(null, { status: 204, headers: responseHeaders })
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, POST, OPTIONS' } })
   if (request.method !== 'POST') return new Response(JSON.stringify({ error: { message: 'POST 요청만 지원합니다.' } }), { status: 405, headers: { ...responseHeaders, Allow: 'GET, HEAD, POST, OPTIONS' } })
@@ -543,6 +612,22 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const url = validateRecipeUrl(typeof body.url === 'string' ? body.url : '')
     const userId = await getAuthenticatedUserId(env, getBearerToken(request))
     await assertPremiumAccess(env, userId)
+    await consumeImportQuota(env, userId)
+
+    const cacheKey = await getImportCacheKey(url)
+    const cachedRecipe = await getCachedImport(env, cacheKey).catch((cacheError) => {
+      console.error('Recipe import cache lookup failed', cacheError)
+      return null
+    })
+    if (cachedRecipe) {
+      return json({
+        ...cachedRecipe,
+        source_url: url.toString(),
+        source_type: 'imported',
+        import_notice: '이전에 검증된 가져오기 결과를 사용했습니다. 저장 전에 내용을 확인해주세요.',
+        cache_hit: true,
+      })
+    }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
     const socialTranscript = isSocialUrl ? await getSocialTranscript(env.SUPADATA_API_KEY, url) : ''
@@ -567,8 +652,10 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
         : '레시피로 정리할 텍스트를 찾지 못했습니다.')
     }
 
-    await consumeImportQuota(env, userId)
     const recipe = await structureRecipe(env.OPENAI_API_KEY, text)
+    await cacheImport(env, cacheKey, recipe).catch((cacheError) => {
+      console.error('Recipe import cache write failed', cacheError)
+    })
     const importNotice = socialTranscript
       ? '영상 자막을 AI로 구조화한 초안입니다. 화면에만 표시된 재료나 과정은 누락될 수 있으므로 저장 전에 확인해주세요.'
       : isSocialUrl
@@ -576,7 +663,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       : jsonLdText
         ? '페이지의 구조화된 Recipe 데이터를 우선 사용한 초안입니다. 저장 전에 내용을 확인해주세요.'
         : '웹페이지 본문에서 추출한 초안입니다. 저장 전에 내용을 확인해주세요.'
-    return json({ ...recipe, source_url: url.toString(), source_type: 'imported', import_notice: importNotice })
+    return json({ ...recipe, source_url: url.toString(), source_type: 'imported', import_notice: importNotice, cache_hit: false })
   } catch (nextError) {
     if (nextError instanceof PublicError) return error(nextError.message, nextError.status)
     if (nextError instanceof Error && nextError.name === 'AbortError') return error('외부 서비스 응답 시간이 초과되었습니다.', 504)
