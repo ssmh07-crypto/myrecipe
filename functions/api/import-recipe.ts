@@ -42,7 +42,7 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v16'
+const pipelineVersion = 'recipe-import-v17'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -342,6 +342,12 @@ const canonicalSourceId = (url: URL) => {
   }
   canonical.searchParams.sort()
   return `web:${canonical.toString()}`
+}
+
+const getSourceImageUrl = (url: URL) => {
+  const sourceId = canonicalSourceId(url)
+  const videoId = sourceId.startsWith('youtube:') ? sourceId.slice('youtube:'.length) : ''
+  return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : ''
 }
 
 const getImportCacheKey = async (url: URL) => {
@@ -769,6 +775,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       await consumeImportQuota(env, userId)
       return json({
         ...cachedRecipe,
+        image_url: getSourceImageUrl(url),
         source_url: url.toString(),
         source_type: 'imported',
         import_notice: '이전에 검증된 가져오기 결과를 사용했습니다. 저장 전에 내용을 확인해주세요.',
@@ -799,6 +806,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       })
       return json({
         ...videoRecipe,
+        image_url: getSourceImageUrl(url),
         source_url: url.toString(),
         source_type: 'imported',
         import_notice: '영상의 화면과 음성을 AI로 분석한 초안입니다. 저장 전에 재료와 조리 과정을 확인해주세요.',
@@ -850,7 +858,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       : jsonLdText
         ? '페이지의 구조화된 Recipe 데이터를 우선 사용한 초안입니다. 저장 전에 내용을 확인해주세요.'
         : '웹페이지 본문에서 추출한 초안입니다. 저장 전에 내용을 확인해주세요.'
-    return json({ ...recipe, source_url: url.toString(), source_type: 'imported', import_notice: importNotice, cache_hit: false })
+    return json({ ...recipe, image_url: getSourceImageUrl(url), source_url: url.toString(), source_type: 'imported', import_notice: importNotice, cache_hit: false })
   } catch (nextError) {
     if (nextError instanceof PublicError) return error(nextError.message, nextError.status)
     if (nextError instanceof Error && nextError.name === 'AbortError') return error('외부 서비스 응답 시간이 초과되었습니다.', 504)
