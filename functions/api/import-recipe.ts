@@ -42,7 +42,8 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v17'
+const pipelineVersion = 'recipe-import-v18'
+const cachePipelineVersion = 'recipe-import-v16'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -358,7 +359,7 @@ const getImportCacheKey = async (url: URL) => {
 
 const getCachedImport = async (env: Env, cacheKey: string) => {
   if (!env.RECIPE_IMAGES) return null
-  const object = await env.RECIPE_IMAGES.get(`cache/recipe-import/${pipelineVersion}/${cacheKey}.json`)
+  const object = await env.RECIPE_IMAGES.get(`cache/recipe-import/${cachePipelineVersion}/${cacheKey}.json`)
   if (!object) return null
   const raw = await new Response(object.body).text()
   if (new TextEncoder().encode(raw).byteLength > 100_000) return null
@@ -369,7 +370,7 @@ const cacheImport = async (env: Env, cacheKey: string, recipe: RecipeDraft) => {
   if (!env.RECIPE_IMAGES) return
   const bytes = new TextEncoder().encode(JSON.stringify(recipe))
   await env.RECIPE_IMAGES.put(
-    `cache/recipe-import/${pipelineVersion}/${cacheKey}.json`,
+    `cache/recipe-import/${cachePipelineVersion}/${cacheKey}.json`,
     bytes.buffer,
     { httpMetadata: { contentType: 'application/json' } },
   )
