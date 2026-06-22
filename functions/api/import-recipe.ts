@@ -37,11 +37,11 @@ const maxHtmlBytes = 500_000
 const maxRedirects = 3
 const externalTimeoutMs = 10_000
 const aiTimeoutMs = 30_000
-const transcriptPollIntervalMs = 1_500
+const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
-const videoExtractPollIntervalMs = 2_000
+const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v8'
+const pipelineVersion = 'recipe-import-v9'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
