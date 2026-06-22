@@ -80,9 +80,6 @@ const getMetaContent = (html: string, property: string) => {
 }
 
 const blockedHosts = [
-  'youtube.com',
-  'youtu.be',
-  'instagram.com',
   'tiktok.com',
   'snapchat.com',
   'facebook.com',
@@ -91,6 +88,16 @@ const blockedHosts = [
 ]
 
 const normalizeHostname = (hostname: string) => hostname.replace(/^www\./i, '').replace(/\.$/, '').toLowerCase()
+
+const isYouTubeHost = (hostname: string) => {
+  const normalized = normalizeHostname(hostname)
+  return normalized === 'youtube.com' || normalized.endsWith('.youtube.com') || normalized === 'youtu.be'
+}
+
+const isInstagramHost = (hostname: string) => {
+  const normalized = normalizeHostname(hostname)
+  return normalized === 'instagram.com' || normalized.endsWith('.instagram.com')
+}
 
 const parseIpv4 = (value: string) => {
   const parts = value.split('.')
@@ -246,9 +253,9 @@ const fetchExternalPage = async (initialUrl: URL) => {
   throw new PublicError('리다이렉트가 너무 많습니다.', 502)
 }
 
-const readLimitedText = async (response: Response) => {
+const readLimitedText = async (response: Response, ignoreDeclaredLength = false) => {
   const contentLength = Number(response.headers.get('Content-Length') || 0)
-  if (contentLength > maxHtmlBytes) throw new PublicError('가져올 페이지가 너무 큽니다.', 413)
+  if (!ignoreDeclaredLength && contentLength > maxHtmlBytes) throw new PublicError('가져올 페이지가 너무 큽니다.', 413)
   if (!response.body) return (await response.text()).slice(0, maxHtmlBytes)
 
   const reader = response.body.getReader()
@@ -268,6 +275,42 @@ const readLimitedText = async (response: Response) => {
     }
   }
   return text + decoder.decode()
+}
+
+const decodeJsonString = (value: string) => {
+  try {
+    return JSON.parse(`"${value}"`) as string
+  } catch {
+    return ''
+  }
+}
+
+const getSocialPageText = async (url: URL, response: Response) => {
+  const html = await readLimitedText(response, true)
+  const metadata = [
+    getMetaContent(html, 'og:title'),
+    getMetaContent(html, 'og:description'),
+    getMetaContent(html, 'description'),
+  ].filter(Boolean)
+
+  if (isYouTubeHost(url.hostname)) {
+    const descriptionMatch = html.match(/"shortDescription":"((?:\\.|[^"\\])*)"/)
+    const pageDescription = descriptionMatch ? decodeJsonString(descriptionMatch[1]) : ''
+    let oEmbedText = ''
+    const oEmbedResponse = await fetchWithTimeout(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url.toString())}&format=json`,
+      { headers: { Accept: 'application/json' } },
+      externalTimeoutMs,
+    ).catch(() => null)
+    if (oEmbedResponse?.ok) {
+      const oEmbed = await oEmbedResponse.json() as { title?: string; author_name?: string }
+      oEmbedText = [oEmbed.title, oEmbed.author_name].filter(Boolean).join('\n')
+    }
+    return [...metadata, pageDescription, oEmbedText].filter(Boolean).join('\n\n').slice(0, 12_000)
+  }
+
+  if (isInstagramHost(url.hostname)) return metadata.join('\n\n').slice(0, 12_000)
+  return ''
 }
 
 const recipeSchema = {
@@ -371,10 +414,17 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const contentType = response.headers.get('Content-Type') || ''
     if (!/(text\/html|text\/plain|application\/xhtml\+xml)/i.test(contentType)) throw new PublicError('텍스트 기반 레시피 페이지 URL만 사용할 수 있습니다.')
 
-    const html = await readLimitedText(response)
-    const metaText = [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n')
-    const text = [metaText, sanitizeText(html)].filter(Boolean).join('\n\n').slice(0, 12_000)
-    if (text.length < 40) throw new PublicError('레시피로 정리할 텍스트를 찾지 못했습니다.')
+    const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
+    const html = isSocialUrl ? '' : await readLimitedText(response)
+    const metaText = html ? [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n') : ''
+    const text = isSocialUrl
+      ? await getSocialPageText(url, response)
+      : [metaText, sanitizeText(html)].filter(Boolean).join('\n\n').slice(0, 12_000)
+    if (text.length < 40) {
+      throw new PublicError(isSocialUrl
+        ? '공개 설명이나 캡션에서 레시피 정보를 찾지 못했습니다. 비공개 또는 로그인 필요 게시물은 지원하지 않습니다.'
+        : '레시피로 정리할 텍스트를 찾지 못했습니다.')
+    }
 
     await consumeImportQuota(env, userId)
     const recipe = await structureRecipe(env.OPENAI_API_KEY, text)
