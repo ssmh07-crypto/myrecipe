@@ -39,7 +39,9 @@ const externalTimeoutMs = 10_000
 const aiTimeoutMs = 30_000
 const transcriptPollIntervalMs = 1_500
 const transcriptPollTimeoutMs = 18_000
-const pipelineVersion = 'recipe-import-v3'
+const videoExtractPollIntervalMs = 2_000
+const videoExtractPollTimeoutMs = 45_000
+const pipelineVersion = 'recipe-import-v4'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -428,6 +430,12 @@ interface TranscriptResponse {
   status?: 'queued' | 'active' | 'completed' | 'failed'
 }
 
+interface ExtractResponse {
+  jobId?: string
+  status?: 'queued' | 'active' | 'completed' | 'failed'
+  data?: unknown
+}
+
 const transcriptText = (content: TranscriptResponse['content']) => {
   const text = typeof content === 'string'
     ? content
@@ -465,6 +473,41 @@ const getSocialTranscript = async (apiKey: string | undefined, url: URL) => {
     if (result.status === 'failed') return ''
   }
   return ''
+}
+
+const getSocialVideoRecipe = async (apiKey: string | undefined, url: URL) => {
+  if (!apiKey) return null
+  const startResponse = await fetchWithTimeout('https://api.supadata.ai/v1/extract', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({
+      url: url.toString(),
+      prompt: 'Extract only recipe details supported by visible on-screen text, visible cooking actions, or spoken audio. Do not invent ingredients, quantities, servings, or steps. Use empty values when unknown.',
+      schema: recipeSchema.schema,
+    }),
+  }, externalTimeoutMs).catch(() => null)
+  if (!startResponse?.ok) return null
+  const started = await startResponse.json() as ExtractResponse
+  if (!started.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(started.jobId)) return null
+
+  const deadline = Date.now() + videoExtractPollTimeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, videoExtractPollIntervalMs))
+    const response = await fetchWithTimeout(`https://api.supadata.ai/v1/extract/${encodeURIComponent(started.jobId)}`, {
+      headers: { Accept: 'application/json', 'x-api-key': apiKey },
+    }, externalTimeoutMs).catch(() => null)
+    if (!response?.ok) return null
+    const result = await response.json() as ExtractResponse
+    if (result.status === 'failed') return null
+    if (result.status === 'completed' && result.data) {
+      try {
+        return validateRecipeDraft(normalizeRecipeDraft(result.data))
+      } catch {
+        return null
+      }
+    }
+  }
+  return null
 }
 
 const getSocialPageText = async (url: URL, response: Response) => {
@@ -623,6 +666,20 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
+    const videoRecipe = isSocialUrl ? await getSocialVideoRecipe(env.SUPADATA_API_KEY, url) : null
+    if (videoRecipe) {
+      await cacheImport(env, cacheKey, videoRecipe).catch((cacheError) => {
+        console.error('Recipe import cache write failed', cacheError)
+      })
+      return json({
+        ...videoRecipe,
+        source_url: url.toString(),
+        source_type: 'imported',
+        import_notice: '영상의 화면과 음성을 AI로 분석한 초안입니다. 저장 전에 재료와 조리 과정을 확인해주세요.',
+        cache_hit: false,
+      })
+    }
+
     const socialTranscript = isSocialUrl ? await getSocialTranscript(env.SUPADATA_API_KEY, url) : ''
     const response = await fetchExternalPage(url)
     if (!response.ok) throw new PublicError('해당 링크를 가져올 수 없습니다.', 502)

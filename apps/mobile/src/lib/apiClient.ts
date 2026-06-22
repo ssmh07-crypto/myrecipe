@@ -3,7 +3,7 @@ import type { RecipeInput } from '../types/recipe'
 type ApiError = { error?: { message?: string } }
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://myrecipe-1im.pages.dev'
-const requestTimeoutMs = 30_000
+const requestTimeoutMs = 120_000
 
 const requestJson = async <T>(path: string, method: 'POST' | 'DELETE', body: unknown, accessToken?: string): Promise<T> => {
   const controller = new AbortController()
@@ -34,7 +34,7 @@ const requestJson = async <T>(path: string, method: 'POST' | 'DELETE', body: unk
 }
 
 export const importRecipeFromUrl = (url: string, accessToken?: string) =>
-  requestJson<Partial<RecipeInput> & { source_url: string }>('/api/import-recipe', 'POST', { url }, accessToken)
+  requestJson<Partial<RecipeInput> & { source_url: string; import_notice?: string }>('/api/import-recipe', 'POST', { url }, accessToken)
 
 export const deleteAccount = (accessToken: string) =>
   requestJson<{ deleted: true }>('/api/delete-account', 'DELETE', undefined, accessToken)
