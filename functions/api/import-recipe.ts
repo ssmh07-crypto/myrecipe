@@ -480,7 +480,7 @@ const readRequestBody = async (request: Request) => {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
-  if (request.method === 'GET') return json({ status: 'ok' })
+  if (request.method === 'GET') return json({ status: 'ok', version: 'quality-v2' })
   if (request.method === 'HEAD') return new Response(null, { status: 204, headers: responseHeaders })
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, POST, OPTIONS' } })
   if (request.method !== 'POST') return new Response(JSON.stringify({ error: { message: 'POST 요청만 지원합니다.' } }), { status: 405, headers: { ...responseHeaders, Allow: 'GET, HEAD, POST, OPTIONS' } })
