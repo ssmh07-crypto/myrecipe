@@ -41,7 +41,7 @@ const transcriptPollIntervalMs = 1_500
 const transcriptPollTimeoutMs = 18_000
 const videoExtractPollIntervalMs = 2_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v4'
+const pipelineVersion = 'recipe-import-v5'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -583,7 +583,8 @@ const normalizeRecipeDraft = (value: unknown): RecipeDraft => {
 
 const validateRecipeDraft = (recipe: RecipeDraft) => {
   const steps = recipe.steps_text.split(/\r?\n/).map((step) => step.trim()).filter(Boolean)
-  if (!recipe.title || recipe.ingredients.length < 2 || steps.length < 1 || recipe.steps_text.length < 30) {
+  const materialCount = recipe.ingredients.length + recipe.seasonings.length
+  if (!recipe.title || materialCount < 1 || steps.length < 1) {
     throw new PublicError('원문에서 충분한 재료와 조리 과정을 확인하지 못해 부정확한 초안 생성을 중단했습니다.', 422)
   }
   return recipe
