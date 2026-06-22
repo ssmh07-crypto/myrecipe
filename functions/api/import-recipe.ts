@@ -41,7 +41,7 @@ const transcriptPollIntervalMs = 1_500
 const transcriptPollTimeoutMs = 18_000
 const videoExtractPollIntervalMs = 2_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v5'
+const pipelineVersion = 'recipe-import-v6'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -500,11 +500,7 @@ const getSocialVideoRecipe = async (apiKey: string | undefined, url: URL) => {
     const result = await response.json() as ExtractResponse
     if (result.status === 'failed') return null
     if (result.status === 'completed' && result.data) {
-      try {
-        return validateRecipeDraft(normalizeRecipeDraft(result.data))
-      } catch {
-        return null
-      }
+      return normalizeRecipeDraft(result.data)
     }
   }
   return null
@@ -581,11 +577,33 @@ const normalizeRecipeDraft = (value: unknown): RecipeDraft => {
   }
 }
 
+const mergeIngredients = (...groups: IngredientDraft[][]) => {
+  const seen = new Set<string>()
+  return groups.flat().filter((item) => {
+    const key = [item.name, item.amount, item.unit].map((part) => part.trim().toLowerCase()).join('\0')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, 100)
+}
+
+const mergeRecipeDrafts = (primary: RecipeDraft, secondary: RecipeDraft): RecipeDraft => ({
+  title: primary.title || secondary.title,
+  servings: primary.servings || secondary.servings,
+  difficulty: primary.difficulty || secondary.difficulty,
+  ingredients: mergeIngredients(primary.ingredients, secondary.ingredients),
+  seasonings: mergeIngredients(primary.seasonings, secondary.seasonings),
+  steps_text: primary.steps_text || secondary.steps_text,
+  step_images: [],
+  memo: primary.memo || secondary.memo,
+})
+
 const validateRecipeDraft = (recipe: RecipeDraft) => {
   const steps = recipe.steps_text.split(/\r?\n/).map((step) => step.trim()).filter(Boolean)
   const materialCount = recipe.ingredients.length + recipe.seasonings.length
-  if (!recipe.title || materialCount < 1 || steps.length < 1) {
-    throw new PublicError('원문에서 충분한 재료와 조리 과정을 확인하지 못해 부정확한 초안 생성을 중단했습니다.', 422)
+  const missing = [!recipe.title && '제목', materialCount < 1 && '재료', steps.length < 1 && '조리 과정'].filter(Boolean)
+  if (missing.length) {
+    throw new PublicError(`원문과 영상에서 ${missing.join(', ')} 정보를 확인하지 못했습니다. 해당 내용이 자막, 설명 또는 화면에 포함된 공개 영상인지 확인해주세요.`, 422)
   }
   return recipe
 }
@@ -615,7 +633,7 @@ const structureRecipe = async (apiKey: string, text: string) => {
   } catch {
     throw new PublicError('AI 응답을 처리하지 못했습니다.', 502)
   }
-  return validateRecipeDraft(normalizeRecipeDraft(parsed))
+  return normalizeRecipeDraft(parsed)
 }
 
 const readRequestBody = async (request: Request) => {
@@ -667,7 +685,15 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
-    const videoRecipe = isSocialUrl ? await getSocialVideoRecipe(env.SUPADATA_API_KEY, url) : null
+    const videoDraft = isSocialUrl ? await getSocialVideoRecipe(env.SUPADATA_API_KEY, url) : null
+    let videoRecipe: RecipeDraft | null = null
+    if (videoDraft) {
+      try {
+        videoRecipe = validateRecipeDraft(videoDraft)
+      } catch {
+        // Keep the partial video result and merge it with transcript extraction below.
+      }
+    }
     if (videoRecipe) {
       await cacheImport(env, cacheKey, videoRecipe).catch((cacheError) => {
         console.error('Recipe import cache write failed', cacheError)
@@ -703,7 +729,8 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
         : '레시피로 정리할 텍스트를 찾지 못했습니다.')
     }
 
-    const recipe = await structureRecipe(env.OPENAI_API_KEY, text)
+    const structuredDraft = await structureRecipe(env.OPENAI_API_KEY, text)
+    const recipe = validateRecipeDraft(videoDraft ? mergeRecipeDrafts(videoDraft, structuredDraft) : structuredDraft)
     await cacheImport(env, cacheKey, recipe).catch((cacheError) => {
       console.error('Recipe import cache write failed', cacheError)
     })
