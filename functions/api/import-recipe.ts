@@ -203,8 +203,8 @@ const assertPremiumAccess = async (env: Env, userId: string) => {
   )
   if (!response.ok) throw new PublicError('Premium 권한을 확인하지 못했습니다.', 502)
   const [profile] = await response.json() as Array<{ plan?: string | null; premium_expires_at?: string | null }>
-  const expiresAt = profile?.premium_expires_at ? new Date(profile.premium_expires_at).getTime() : Number.POSITIVE_INFINITY
-  if (profile?.plan !== 'premium' || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+  const expiresAt = profile?.premium_expires_at ? new Date(profile.premium_expires_at).getTime() : null
+  if (profile?.plan !== 'premium' || (expiresAt !== null && (!Number.isFinite(expiresAt) || expiresAt <= Date.now()))) {
     throw new PublicError('Premium 기능입니다.', 403)
   }
 }
