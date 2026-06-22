@@ -1,5 +1,6 @@
 interface Env {
   OPENAI_API_KEY: string
+  SUPADATA_API_KEY?: string
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
 }
@@ -32,6 +33,8 @@ const maxHtmlBytes = 500_000
 const maxRedirects = 3
 const externalTimeoutMs = 10_000
 const aiTimeoutMs = 30_000
+const transcriptPollIntervalMs = 1_500
+const transcriptPollTimeoutMs = 18_000
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -358,6 +361,55 @@ const decodeJsonString = (value: string) => {
   }
 }
 
+interface TranscriptChunk {
+  text?: string
+}
+
+interface TranscriptResponse {
+  content?: string | TranscriptChunk[]
+  jobId?: string
+  status?: 'queued' | 'active' | 'completed' | 'failed'
+}
+
+const transcriptText = (content: TranscriptResponse['content']) => {
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((chunk) => textFromValue(chunk?.text, 2_000)).filter(Boolean).join('\n')
+      : ''
+  return text.replace(/\s+/g, ' ').trim().slice(0, 12_000)
+}
+
+const fetchSupadataJson = async (apiKey: string, endpoint: string) => {
+  const response = await fetchWithTimeout(`https://api.supadata.ai/v1${endpoint}`, {
+    headers: { Accept: 'application/json', 'x-api-key': apiKey },
+  }, externalTimeoutMs)
+  if (!response.ok) return null
+  return await response.json() as TranscriptResponse
+}
+
+const getSocialTranscript = async (apiKey: string | undefined, url: URL) => {
+  if (!apiKey) return ''
+  const query = new URLSearchParams({ url: url.toString(), text: 'true', mode: 'auto' })
+  const initial = await fetchSupadataJson(apiKey, `/transcript?${query.toString()}`).catch(() => null)
+  if (!initial) return ''
+
+  const immediateText = transcriptText(initial.content)
+  if (immediateText) return immediateText
+  if (!initial.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(initial.jobId)) return ''
+
+  const deadline = Date.now() + transcriptPollTimeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, transcriptPollIntervalMs))
+    const result = await fetchSupadataJson(apiKey, `/transcript/${encodeURIComponent(initial.jobId)}`).catch(() => null)
+    if (!result) return ''
+    const text = transcriptText(result.content)
+    if (text) return text
+    if (result.status === 'failed') return ''
+  }
+  return ''
+}
+
 const getSocialPageText = async (url: URL, response: Response) => {
   const html = await readLimitedText(response, true)
   const metadata = [
@@ -480,7 +532,7 @@ const readRequestBody = async (request: Request) => {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
-  if (request.method === 'GET') return json({ status: 'ok', version: 'quality-v2' })
+  if (request.method === 'GET') return json({ status: 'ok', version: 'transcript-v1', transcript_configured: Boolean(env.SUPADATA_API_KEY) })
   if (request.method === 'HEAD') return new Response(null, { status: 204, headers: responseHeaders })
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, POST, OPTIONS' } })
   if (request.method !== 'POST') return new Response(JSON.stringify({ error: { message: 'POST 요청만 지원합니다.' } }), { status: 405, headers: { ...responseHeaders, Allow: 'GET, HEAD, POST, OPTIONS' } })
@@ -492,17 +544,22 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const userId = await getAuthenticatedUserId(env, getBearerToken(request))
     await assertPremiumAccess(env, userId)
 
+    const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
+    const socialTranscript = isSocialUrl ? await getSocialTranscript(env.SUPADATA_API_KEY, url) : ''
     const response = await fetchExternalPage(url)
     if (!response.ok) throw new PublicError('해당 링크를 가져올 수 없습니다.', 502)
     const contentType = response.headers.get('Content-Type') || ''
     if (!/(text\/html|text\/plain|application\/xhtml\+xml)/i.test(contentType)) throw new PublicError('텍스트 기반 레시피 페이지 URL만 사용할 수 있습니다.')
 
-    const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
     const html = isSocialUrl ? '' : await readLimitedText(response)
     const jsonLdText = html ? getRecipeJsonLdText(html) : ''
     const metaText = html ? [getMetaContent(html, 'og:title'), getMetaContent(html, 'og:description'), getMetaContent(html, 'description')].filter(Boolean).join('\n') : ''
+    const socialPageText = isSocialUrl ? await getSocialPageText(url, response) : ''
     const text = isSocialUrl
-      ? await getSocialPageText(url, response)
+      ? [socialPageText && `영상 제목 및 공개 설명:\n${socialPageText}`, socialTranscript && `영상 자막:\n${socialTranscript}`]
+          .filter(Boolean)
+          .join('\n\n')
+          .slice(0, 12_000)
       : jsonLdText || [metaText, sanitizeText(html)].filter(Boolean).join('\n\n').slice(0, 12_000)
     if (text.length < 40) {
       throw new PublicError(isSocialUrl
@@ -512,8 +569,10 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
 
     await consumeImportQuota(env, userId)
     const recipe = await structureRecipe(env.OPENAI_API_KEY, text)
-    const importNotice = isSocialUrl
-      ? '공개 설명과 캡션만 분석한 초안입니다. 영상 속 음성과 화면은 분석하지 않았으므로 저장 전에 확인해주세요.'
+    const importNotice = socialTranscript
+      ? '영상 자막을 AI로 구조화한 초안입니다. 화면에만 표시된 재료나 과정은 누락될 수 있으므로 저장 전에 확인해주세요.'
+      : isSocialUrl
+        ? '공개 설명과 캡션만 분석한 초안입니다. 영상 속 음성과 화면은 분석하지 않았으므로 저장 전에 확인해주세요.'
       : jsonLdText
         ? '페이지의 구조화된 Recipe 데이터를 우선 사용한 초안입니다. 저장 전에 내용을 확인해주세요.'
         : '웹페이지 본문에서 추출한 초안입니다. 저장 전에 내용을 확인해주세요.'
