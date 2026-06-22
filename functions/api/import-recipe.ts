@@ -42,7 +42,7 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v12'
+const pipelineVersion = 'recipe-import-v13'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -453,6 +453,18 @@ const transcriptText = (content: TranscriptResponse['content']) => {
   return text.replace(/\s+/g, ' ').trim().slice(0, 12_000)
 }
 
+const getSupadataUrl = (url: URL) => {
+  if (!isYouTubeHost(url.hostname)) return url.toString()
+  const hostname = normalizeHostname(url.hostname)
+  const pathParts = url.pathname.split('/').filter(Boolean)
+  const videoId = hostname === 'youtu.be'
+    ? pathParts[0]
+    : url.searchParams.get('v') || (['shorts', 'embed', 'live'].includes(pathParts[0] || '') ? pathParts[1] : '')
+  return videoId && /^[a-zA-Z0-9_-]{6,20}$/.test(videoId)
+    ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
+    : url.toString()
+}
+
 const supadataErrorText = (value: unknown, fallback: string) => {
   if (typeof value === 'string') return clean(value, 300) || fallback
   if (!value || typeof value !== 'object') return fallback
@@ -477,7 +489,7 @@ const fetchSupadataJson = async <T extends { error?: unknown }>(apiKey: string, 
 
 const getSocialTranscript = async (apiKey: string | undefined, url: URL) => {
   if (!apiKey) return { text: '', error: 'API 키가 설정되지 않음' }
-  const query = new URLSearchParams({ url: url.toString(), text: 'true', mode: 'auto' })
+  const query = new URLSearchParams({ url: getSupadataUrl(url), lang: 'ko', text: 'true', mode: 'auto' })
   const initialResult = await fetchSupadataJson<TranscriptResponse>(apiKey, `/transcript?${query.toString()}`)
   const initial = initialResult.data
   if (!initial) return { text: '', error: initialResult.error }
@@ -507,7 +519,7 @@ const getSocialVideoRecipe = async (apiKey: string | undefined, url: URL) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      url: url.toString(),
+      url: getSupadataUrl(url),
       prompt: 'Extract only recipe details supported by visible on-screen text, visible cooking actions, or spoken audio. Do not invent ingredients, quantities, servings, or steps. Use empty values when unknown.',
       schema: videoRecipeSchema,
     }),
