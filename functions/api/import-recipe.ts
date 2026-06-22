@@ -42,7 +42,7 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v14'
+const pipelineVersion = 'recipe-import-v15'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -759,7 +759,6 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const url = validateRecipeUrl(typeof body.url === 'string' ? body.url : '')
     const userId = await getAuthenticatedUserId(env, getBearerToken(request))
     await assertPremiumAccess(env, userId)
-    await consumeImportQuota(env, userId)
 
     const cacheKey = await getImportCacheKey(url)
     const cachedRecipe = await getCachedImport(env, cacheKey).catch((cacheError) => {
@@ -767,6 +766,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       return null
     })
     if (cachedRecipe) {
+      await consumeImportQuota(env, userId)
       return json({
         ...cachedRecipe,
         source_url: url.toString(),
@@ -795,6 +795,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       }
     }
     if (videoRecipe) {
+      await consumeImportQuota(env, userId)
       await cacheImport(env, cacheKey, videoRecipe).catch((cacheError) => {
         console.error('Recipe import cache write failed', cacheError)
       })
@@ -835,6 +836,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       if (!isSocialUrl || !(validationError instanceof PublicError) || validationError.status !== 422) throw validationError
       throw new PublicError(`Supadata 추출 결과로 레시피를 생성할 수 없습니다. 자막: ${transcriptResult.error || '재료/조리 과정 없음'} / 영상: ${videoResult.error || '재료/조리 과정 없음'}`, 422)
     }
+    await consumeImportQuota(env, userId)
     await cacheImport(env, cacheKey, recipe).catch((cacheError) => {
       console.error('Recipe import cache write failed', cacheError)
     })
