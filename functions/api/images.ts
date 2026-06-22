@@ -17,7 +17,7 @@ interface Env {
 }
 
 const maxImageBytes = 10 * 1024 * 1024
-const signedUrlLifetimeSeconds = 15 * 60
+const signedUrlLifetimeSeconds = 24 * 60 * 60
 const allowedTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],

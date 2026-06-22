@@ -1,6 +1,10 @@
 interface Env {
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
+  RECIPE_IMAGES: {
+    list(options: { prefix: string; cursor?: string }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string }>
+    delete(keys: string[]): Promise<void>
+  }
 }
 
 const headers = {
@@ -46,7 +50,7 @@ const getImagePaths = async (env: Env, userId: string) => {
   return [...new Set(recipes.flatMap((recipe) => [
     recipe.image_path,
     ...(Array.isArray(recipe.step_image_paths) ? recipe.step_image_paths : []),
-  ]).filter((path): path is string => typeof path === 'string' && path.startsWith(`${userId}/`)))]
+  ]).filter((path): path is string => typeof path === 'string' && !path.startsWith('r2:') && path.startsWith(`${userId}/`)))]
 }
 
 const deleteImages = async (env: Env, paths: string[]) => {
@@ -63,16 +67,26 @@ const deleteImages = async (env: Env, paths: string[]) => {
   if (!response.ok) throw new Error('image_delete_failed')
 }
 
+const deleteR2Images = async (env: Env, userId: string) => {
+  let cursor: string | undefined
+  do {
+    const result = await env.RECIPE_IMAGES.list({ prefix: `${userId}/`, ...(cursor ? { cursor } : {}) })
+    const keys = result.objects.map((object) => object.key)
+    if (keys.length) await env.RECIPE_IMAGES.delete(keys)
+    cursor = result.truncated ? result.cursor : undefined
+  } while (cursor)
+}
+
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'DELETE, OPTIONS' } })
   if (request.method !== 'DELETE') return new Response(JSON.stringify({ error: { message: 'DELETE 요청만 지원합니다.' } }), { status: 405, headers: { ...headers, Allow: 'DELETE, OPTIONS' } })
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return json({ error: { message: '서버 설정이 완료되지 않았습니다.' } }, 500)
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !env.RECIPE_IMAGES) return json({ error: { message: '서버 설정이 완료되지 않았습니다.' } }, 500)
 
   try {
     const userId = await getUserId(env, getBearerToken(request))
     if (!userId) return json({ error: { message: '로그인이 필요합니다.' } }, 401)
 
-    await deleteImages(env, await getImagePaths(env, userId))
+    await Promise.all([deleteImages(env, await getImagePaths(env, userId)), deleteR2Images(env, userId)])
     const response = await fetchWithTimeout(`${env.SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
       headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
