@@ -3,6 +3,10 @@ interface Env {
   SUPADATA_API_KEY?: string
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
+  RECIPE_IMAGES?: {
+    get(key: string): Promise<{ body: ReadableStream<Uint8Array> } | null>
+    put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>
+  }
 }
 
 interface IngredientDraft {
@@ -343,39 +347,23 @@ const getImportCacheKey = async (url: URL) => {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-const serviceRoleHeaders = (env: Env) => ({
-  apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-  Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-})
-
 const getCachedImport = async (env: Env, cacheKey: string) => {
-  const params = new URLSearchParams({
-    cache_key: `eq.${cacheKey}`,
-    pipeline_version: `eq.${pipelineVersion}`,
-    select: 'result',
-    limit: '1',
-  })
-  const response = await fetchWithTimeout(`${env.SUPABASE_URL}/rest/v1/recipe_import_cache?${params.toString()}`, {
-    headers: serviceRoleHeaders(env),
-  }, externalTimeoutMs)
-  if (!response.ok) throw new PublicError('가져오기 캐시를 확인하지 못했습니다.', 502)
-  const [row] = await response.json() as Array<{ result?: unknown }>
-  if (!row?.result) return null
-  return validateRecipeDraft(normalizeRecipeDraft(row.result))
+  if (!env.RECIPE_IMAGES) return null
+  const object = await env.RECIPE_IMAGES.get(`cache/recipe-import/${pipelineVersion}/${cacheKey}.json`)
+  if (!object) return null
+  const raw = await new Response(object.body).text()
+  if (new TextEncoder().encode(raw).byteLength > 100_000) return null
+  return validateRecipeDraft(normalizeRecipeDraft(JSON.parse(raw)))
 }
 
 const cacheImport = async (env: Env, cacheKey: string, recipe: RecipeDraft) => {
-  const params = new URLSearchParams({ on_conflict: 'cache_key,pipeline_version' })
-  const response = await fetchWithTimeout(`${env.SUPABASE_URL}/rest/v1/recipe_import_cache?${params.toString()}`, {
-    method: 'POST',
-    headers: {
-      ...serviceRoleHeaders(env),
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    },
-    body: JSON.stringify({ cache_key: cacheKey, pipeline_version: pipelineVersion, result: recipe, updated_at: new Date().toISOString() }),
-  }, externalTimeoutMs)
-  if (!response.ok) throw new PublicError('가져오기 결과를 캐시에 저장하지 못했습니다.', 502)
+  if (!env.RECIPE_IMAGES) return
+  const bytes = new TextEncoder().encode(JSON.stringify(recipe))
+  await env.RECIPE_IMAGES.put(
+    `cache/recipe-import/${pipelineVersion}/${cacheKey}.json`,
+    bytes.buffer,
+    { httpMetadata: { contentType: 'application/json' } },
+  )
 }
 
 const fetchExternalPage = async (initialUrl: URL) => {
@@ -601,7 +589,12 @@ const readRequestBody = async (request: Request) => {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
-  if (request.method === 'GET') return json({ status: 'ok', version: pipelineVersion, transcript_configured: Boolean(env.SUPADATA_API_KEY) })
+  if (request.method === 'GET') return json({
+    status: 'ok',
+    version: pipelineVersion,
+    transcript_configured: Boolean(env.SUPADATA_API_KEY),
+    shared_cache_configured: Boolean(env.RECIPE_IMAGES),
+  })
   if (request.method === 'HEAD') return new Response(null, { status: 204, headers: responseHeaders })
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, POST, OPTIONS' } })
   if (request.method !== 'POST') return new Response(JSON.stringify({ error: { message: 'POST 요청만 지원합니다.' } }), { status: 405, headers: { ...responseHeaders, Allow: 'GET, HEAD, POST, OPTIONS' } })
