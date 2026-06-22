@@ -38,10 +38,10 @@ const maxRedirects = 3
 const externalTimeoutMs = 10_000
 const aiTimeoutMs = 30_000
 const transcriptPollIntervalMs = 1_500
-const transcriptPollTimeoutMs = 18_000
+const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 2_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v6'
+const pipelineVersion = 'recipe-import-v7'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -685,7 +685,13 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
-    const videoDraft = isSocialUrl ? await getSocialVideoRecipe(env.SUPADATA_API_KEY, url) : null
+    const [videoDraft, socialTranscript, response] = isSocialUrl
+      ? await Promise.all([
+          getSocialVideoRecipe(env.SUPADATA_API_KEY, url),
+          getSocialTranscript(env.SUPADATA_API_KEY, url),
+          fetchExternalPage(url),
+        ])
+      : [null, '', await fetchExternalPage(url)] as const
     let videoRecipe: RecipeDraft | null = null
     if (videoDraft) {
       try {
@@ -707,8 +713,6 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       })
     }
 
-    const socialTranscript = isSocialUrl ? await getSocialTranscript(env.SUPADATA_API_KEY, url) : ''
-    const response = await fetchExternalPage(url)
     if (!response.ok) throw new PublicError('해당 링크를 가져올 수 없습니다.', 502)
     const contentType = response.headers.get('Content-Type') || ''
     if (!/(text\/html|text\/plain|application\/xhtml\+xml)/i.test(contentType)) throw new PublicError('텍스트 기반 레시피 페이지 URL만 사용할 수 있습니다.')
