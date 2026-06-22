@@ -78,6 +78,20 @@ const createSignedUrl = async (request: Request, env: Env, path: string) => {
 const isOwnedPath = (path: string, userId: string) =>
   path.startsWith(`${userId}/`) && path.length <= 1_000 && !path.includes('..') && !path.includes('\\')
 
+const hasValidImageSignature = (bytes: ArrayBuffer, contentType: string) => {
+  const view = new Uint8Array(bytes.slice(0, 16))
+  if (contentType === 'image/jpeg') return view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff
+  if (contentType === 'image/png') return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => view[index] === value)
+  if (contentType === 'image/webp') {
+    return String.fromCharCode(...view.slice(0, 4)) === 'RIFF' && String.fromCharCode(...view.slice(8, 12)) === 'WEBP'
+  }
+  if (contentType === 'image/heic' || contentType === 'image/heif') {
+    const box = String.fromCharCode(...view.slice(4, 12))
+    return box.startsWith('ftyp') && ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(box.slice(4, 8))
+  }
+  return false
+}
+
 const serveSignedImage = async (request: Request, env: Env, url: URL, path: string) => {
   const expires = Number(url.searchParams.get('expires') || 0)
   const signature = url.searchParams.get('signature') || ''
@@ -112,6 +126,7 @@ const uploadImage = async (request: Request, env: Env, userId: string) => {
 
   const bytes = await request.arrayBuffer()
   if (!bytes.byteLength || bytes.byteLength > maxImageBytes) return error('이미지는 10MB 이하만 업로드할 수 있습니다.', 413)
+  if (!hasValidImageSignature(bytes, contentType)) return error('이미지 파일 형식이 올바르지 않습니다.', 415)
   const path = `${userId}/${resourceId}/${imageFolder}/${crypto.randomUUID()}.${extension}`
   await env.RECIPE_IMAGES.put(path, bytes, { httpMetadata: { contentType } })
   return json({ path, url: await createSignedUrl(request, env, path) }, 201)
