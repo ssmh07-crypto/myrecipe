@@ -42,7 +42,7 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v11'
+const pipelineVersion = 'recipe-import-v12'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -526,7 +526,7 @@ const getSocialVideoRecipe = async (apiKey: string | undefined, url: URL) => {
     if (!result) return { draft: null, error: resultResponse.error }
     if (result.status === 'failed') return { draft: null, error: supadataErrorText(result.error, '영상 분석 작업 실패') }
     if (result.status === 'completed' && result.data) {
-      return { draft: normalizeRecipeDraft(result.data), error: '' }
+      return { draft: normalizeVideoRecipeDraft(result.data), error: '' }
     }
   }
   return { draft: null, error: '영상 분석 작업 45초 대기 시간 초과' }
@@ -560,26 +560,32 @@ const getSocialPageText = async (url: URL, response: Response) => {
   return ''
 }
 
-const videoIngredientSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string' },
-    amount: { type: 'string' },
-    unit: { type: 'string' },
-  },
-}
-
 const videoRecipeSchema = {
   type: 'object',
   properties: {
-    title: { type: 'string' },
-    servings: { type: 'number' },
-    difficulty: { type: 'string' },
-    ingredients: { type: 'array', items: videoIngredientSchema },
-    seasonings: { type: 'array', items: videoIngredientSchema },
-    steps_text: { type: 'string' },
-    memo: { type: 'string' },
+    title: { type: 'string', description: 'Name of the dish in Korean' },
+    servings: { type: 'number', description: 'Number of servings, or 0 when not shown' },
+    prepTimeMinutes: { type: 'number', description: 'Preparation time in minutes, or 0 when not shown' },
+    cookTimeMinutes: { type: 'number', description: 'Cooking time in minutes, or 0 when not shown' },
+    ingredients: {
+      type: 'array',
+      description: 'All ingredients and seasonings visible or spoken in the video',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          quantity: { type: 'string' },
+        },
+        required: ['name', 'quantity'],
+      },
+    },
+    steps: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Step-by-step cooking instructions in Korean',
+    },
   },
+  required: ['title', 'ingredients', 'steps'],
 }
 
 const recipeSchema = {
@@ -622,6 +628,32 @@ const normalizeRecipeDraft = (value: unknown): RecipeDraft => {
     steps_text: clean(draft.steps_text, 50_000),
     step_images: [],
     memo: clean(draft.memo, 10_000),
+  }
+}
+
+const normalizeVideoRecipeDraft = (value: unknown): RecipeDraft => {
+  const draft = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const ingredients = Array.isArray(draft.ingredients)
+    ? draft.ingredients.slice(0, 100).map((item) => {
+        const ingredient = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+        return { name: clean(ingredient.name, 200), amount: clean(ingredient.quantity, 100), unit: '' }
+      }).filter((item) => item.name)
+    : []
+  const steps = Array.isArray(draft.steps)
+    ? draft.steps.map((step) => clean(step, 2_000)).filter(Boolean).slice(0, 100)
+    : []
+  const prepTime = Math.max(0, Number(draft.prepTimeMinutes) || 0)
+  const cookTime = Math.max(0, Number(draft.cookTimeMinutes) || 0)
+  const timeMemo = [prepTime && `준비 ${prepTime}분`, cookTime && `조리 ${cookTime}분`].filter(Boolean).join(', ')
+  return {
+    title: clean(draft.title, 200),
+    servings: Math.min(100, Math.max(0, Number(draft.servings) || 0)),
+    difficulty: '쉬움',
+    ingredients,
+    seasonings: [],
+    steps_text: steps.join('\n'),
+    step_images: [],
+    memo: timeMemo,
   }
 }
 
