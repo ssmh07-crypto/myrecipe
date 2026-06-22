@@ -41,7 +41,7 @@ const transcriptPollIntervalMs = 1_500
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 2_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v7'
+const pipelineVersion = 'recipe-import-v8'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -734,7 +734,16 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const structuredDraft = await structureRecipe(env.OPENAI_API_KEY, text)
-    const recipe = validateRecipeDraft(videoDraft ? mergeRecipeDrafts(videoDraft, structuredDraft) : structuredDraft)
+    let recipe: RecipeDraft
+    try {
+      recipe = validateRecipeDraft(videoDraft ? mergeRecipeDrafts(videoDraft, structuredDraft) : structuredDraft)
+    } catch (validationError) {
+      if (!isSocialUrl || !(validationError instanceof PublicError) || validationError.status !== 422) throw validationError
+      const transcriptExcerpt = socialTranscript.replace(/\s+/g, ' ').trim().slice(0, 500)
+      throw new PublicError(transcriptExcerpt
+        ? `Supadata 자막 추출 결과(${socialTranscript.length}자): ${transcriptExcerpt}`
+        : 'Supadata에서 이 영상의 자막을 추출하지 못했습니다.', 422)
+    }
     await cacheImport(env, cacheKey, recipe).catch((cacheError) => {
       console.error('Recipe import cache write failed', cacheError)
     })
