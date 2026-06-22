@@ -42,7 +42,7 @@ const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v15'
+const pipelineVersion = 'recipe-import-v16'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -777,15 +777,13 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
-    const [videoResult, transcriptResult, response] = isSocialUrl
+    const [videoResult, response] = isSocialUrl
       ? await Promise.all([
           getSocialVideoRecipe(env.SUPADATA_API_KEY, url),
-          getSocialTranscript(env.SUPADATA_API_KEY, url),
           fetchExternalPage(url),
         ])
-      : [{ draft: null, error: '' }, { text: '', error: '' }, await fetchExternalPage(url)] as const
+      : [{ draft: null, error: '' }, await fetchExternalPage(url)] as const
     const videoDraft = videoResult.draft
-    const socialTranscript = transcriptResult.text
     let videoRecipe: RecipeDraft | null = null
     if (videoDraft) {
       try {
@@ -807,6 +805,11 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
         cache_hit: false,
       })
     }
+
+    const transcriptResult = isSocialUrl
+      ? await getSocialTranscript(env.SUPADATA_API_KEY, url)
+      : { text: '', error: '' }
+    const socialTranscript = transcriptResult.text
 
     if (!response.ok) throw new PublicError('해당 링크를 가져올 수 없습니다.', 502)
     const contentType = response.headers.get('Content-Type') || ''
