@@ -36,12 +36,13 @@ const maxRequestBytes = 4_096
 const maxHtmlBytes = 500_000
 const maxRedirects = 3
 const externalTimeoutMs = 10_000
+const supadataTimeoutMs = 30_000
 const aiTimeoutMs = 30_000
 const transcriptPollIntervalMs = 5_000
 const transcriptPollTimeoutMs = 60_000
 const videoExtractPollIntervalMs = 5_000
 const videoExtractPollTimeoutMs = 45_000
-const pipelineVersion = 'recipe-import-v10'
+const pipelineVersion = 'recipe-import-v11'
 
 class PublicError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -428,12 +429,19 @@ interface TranscriptResponse {
   content?: string | TranscriptChunk[]
   jobId?: string
   status?: 'queued' | 'active' | 'completed' | 'failed'
+  error?: unknown
 }
 
 interface ExtractResponse {
   jobId?: string
   status?: 'queued' | 'active' | 'completed' | 'failed'
   data?: unknown
+  error?: unknown
+}
+
+interface SupadataResult<T> {
+  data: T | null
+  error: string
 }
 
 const transcriptText = (content: TranscriptResponse['content']) => {
@@ -445,65 +453,83 @@ const transcriptText = (content: TranscriptResponse['content']) => {
   return text.replace(/\s+/g, ' ').trim().slice(0, 12_000)
 }
 
-const fetchSupadataJson = async (apiKey: string, endpoint: string) => {
-  const response = await fetchWithTimeout(`https://api.supadata.ai/v1${endpoint}`, {
-    headers: { Accept: 'application/json', 'x-api-key': apiKey },
-  }, externalTimeoutMs)
-  if (!response.ok) return null
-  return await response.json() as TranscriptResponse
+const supadataErrorText = (value: unknown, fallback: string) => {
+  if (typeof value === 'string') return clean(value, 300) || fallback
+  if (!value || typeof value !== 'object') return fallback
+  const errorValue = value as Record<string, unknown>
+  return clean(errorValue.details || errorValue.message || errorValue.error, 300) || fallback
+}
+
+const fetchSupadataJson = async <T extends { error?: unknown }>(apiKey: string, endpoint: string, init: RequestInit = {}): Promise<SupadataResult<T>> => {
+  try {
+    const response = await fetchWithTimeout(`https://api.supadata.ai/v1${endpoint}`, {
+      ...init,
+      headers: { Accept: 'application/json', 'x-api-key': apiKey, ...init.headers },
+    }, supadataTimeoutMs)
+    const data = await response.json().catch(() => null) as T | null
+    if (!response.ok) return { data: null, error: `HTTP ${response.status}: ${supadataErrorText(data?.error, response.statusText || 'request failed')}` }
+    return { data, error: '' }
+  } catch (nextError) {
+    const message = nextError instanceof Error && nextError.name === 'AbortError' ? '30초 응답 시간 초과' : '네트워크 요청 실패'
+    return { data: null, error: message }
+  }
 }
 
 const getSocialTranscript = async (apiKey: string | undefined, url: URL) => {
-  if (!apiKey) return ''
+  if (!apiKey) return { text: '', error: 'API 키가 설정되지 않음' }
   const query = new URLSearchParams({ url: url.toString(), text: 'true', mode: 'auto' })
-  const initial = await fetchSupadataJson(apiKey, `/transcript?${query.toString()}`).catch(() => null)
-  if (!initial) return ''
+  const initialResult = await fetchSupadataJson<TranscriptResponse>(apiKey, `/transcript?${query.toString()}`)
+  const initial = initialResult.data
+  if (!initial) return { text: '', error: initialResult.error }
 
   const immediateText = transcriptText(initial.content)
-  if (immediateText) return immediateText
-  if (!initial.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(initial.jobId)) return ''
+  if (immediateText) return { text: immediateText, error: '' }
+  if (!initial.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(initial.jobId)) {
+    return { text: '', error: supadataErrorText(initial.error, '자막과 작업 ID가 없는 응답') }
+  }
 
   const deadline = Date.now() + transcriptPollTimeoutMs
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, transcriptPollIntervalMs))
-    const result = await fetchSupadataJson(apiKey, `/transcript/${encodeURIComponent(initial.jobId)}`).catch(() => null)
-    if (!result) return ''
+    const resultResponse = await fetchSupadataJson<TranscriptResponse>(apiKey, `/transcript/${encodeURIComponent(initial.jobId)}`)
+    const result = resultResponse.data
+    if (!result) return { text: '', error: resultResponse.error }
     const text = transcriptText(result.content)
-    if (text) return text
-    if (result.status === 'failed') return ''
+    if (text) return { text, error: '' }
+    if (result.status === 'failed') return { text: '', error: supadataErrorText(result.error, '자막 생성 작업 실패') }
   }
-  return ''
+  return { text: '', error: '자막 생성 작업 60초 대기 시간 초과' }
 }
 
 const getSocialVideoRecipe = async (apiKey: string | undefined, url: URL) => {
-  if (!apiKey) return null
-  const startResponse = await fetchWithTimeout('https://api.supadata.ai/v1/extract', {
+  if (!apiKey) return { draft: null, error: 'API 키가 설정되지 않음' }
+  const startedResult = await fetchSupadataJson<ExtractResponse>(apiKey, '/extract', {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       url: url.toString(),
       prompt: 'Extract only recipe details supported by visible on-screen text, visible cooking actions, or spoken audio. Do not invent ingredients, quantities, servings, or steps. Use empty values when unknown.',
-      schema: recipeSchema.schema,
+      schema: videoRecipeSchema,
     }),
-  }, externalTimeoutMs).catch(() => null)
-  if (!startResponse?.ok) return null
-  const started = await startResponse.json() as ExtractResponse
-  if (!started.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(started.jobId)) return null
+  })
+  const started = startedResult.data
+  if (!started) return { draft: null, error: startedResult.error }
+  if (!started.jobId || !/^[a-zA-Z0-9-]{1,100}$/.test(started.jobId)) {
+    return { draft: null, error: supadataErrorText(started.error, '영상 분석 작업 ID가 없는 응답') }
+  }
 
   const deadline = Date.now() + videoExtractPollTimeoutMs
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, videoExtractPollIntervalMs))
-    const response = await fetchWithTimeout(`https://api.supadata.ai/v1/extract/${encodeURIComponent(started.jobId)}`, {
-      headers: { Accept: 'application/json', 'x-api-key': apiKey },
-    }, externalTimeoutMs).catch(() => null)
-    if (!response?.ok) return null
-    const result = await response.json() as ExtractResponse
-    if (result.status === 'failed') return null
+    const resultResponse = await fetchSupadataJson<ExtractResponse>(apiKey, `/extract/${encodeURIComponent(started.jobId)}`)
+    const result = resultResponse.data
+    if (!result) return { draft: null, error: resultResponse.error }
+    if (result.status === 'failed') return { draft: null, error: supadataErrorText(result.error, '영상 분석 작업 실패') }
     if (result.status === 'completed' && result.data) {
-      return normalizeRecipeDraft(result.data)
+      return { draft: normalizeRecipeDraft(result.data), error: '' }
     }
   }
-  return null
+  return { draft: null, error: '영상 분석 작업 45초 대기 시간 초과' }
 }
 
 const getSocialPageText = async (url: URL, response: Response) => {
@@ -532,6 +558,28 @@ const getSocialPageText = async (url: URL, response: Response) => {
 
   if (isInstagramHost(url.hostname)) return metadata.join('\n\n').slice(0, 12_000)
   return ''
+}
+
+const videoIngredientSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    amount: { type: 'string' },
+    unit: { type: 'string' },
+  },
+}
+
+const videoRecipeSchema = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    servings: { type: 'number' },
+    difficulty: { type: 'string' },
+    ingredients: { type: 'array', items: videoIngredientSchema },
+    seasonings: { type: 'array', items: videoIngredientSchema },
+    steps_text: { type: 'string' },
+    memo: { type: 'string' },
+  },
 }
 
 const recipeSchema = {
@@ -688,13 +736,15 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     }
 
     const isSocialUrl = isYouTubeHost(url.hostname) || isInstagramHost(url.hostname)
-    const [videoDraft, socialTranscript, response] = isSocialUrl
+    const [videoResult, transcriptResult, response] = isSocialUrl
       ? await Promise.all([
           getSocialVideoRecipe(env.SUPADATA_API_KEY, url),
           getSocialTranscript(env.SUPADATA_API_KEY, url),
           fetchExternalPage(url),
         ])
-      : [null, '', await fetchExternalPage(url)] as const
+      : [{ draft: null, error: '' }, { text: '', error: '' }, await fetchExternalPage(url)] as const
+    const videoDraft = videoResult.draft
+    const socialTranscript = transcriptResult.text
     let videoRecipe: RecipeDraft | null = null
     if (videoDraft) {
       try {
@@ -750,7 +800,7 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       console.error('Recipe import cache write failed', cacheError)
     })
     const importNotice = usedInferenceFallback
-      ? 'Supadata가 영상 자막과 레시피 정보를 추출하지 못해, 제목을 기준으로 AI가 추론한 초안입니다. 영상 원문과 다를 수 있으므로 저장 전에 반드시 확인해주세요.'
+      ? `Supadata 추출에 실패해 제목을 기준으로 AI가 추론한 초안입니다. 자막: ${transcriptResult.error || '정보 없음'} / 영상: ${videoResult.error || '정보 없음'}. 저장 전에 반드시 확인해주세요.`
       : socialTranscript
       ? '영상 자막을 AI로 구조화한 초안입니다. 화면에만 표시된 재료나 과정은 누락될 수 있으므로 저장 전에 확인해주세요.'
       : isSocialUrl
