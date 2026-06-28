@@ -17,7 +17,7 @@ interface Env {
 }
 
 const maxImageBytes = 10 * 1024 * 1024
-const signedUrlLifetimeSeconds = 24 * 60 * 60
+const signedUrlLifetimeSeconds = 15 * 60
 const allowedTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
@@ -28,7 +28,12 @@ const allowedTypes = new Map([
 
 const jsonHeaders = {
   'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
   'Content-Type': 'application/json; charset=utf-8',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Referrer-Policy': 'no-referrer',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
 }
 
@@ -43,10 +48,40 @@ const getUserId = async (env: Env, request: Request) => {
   if (!token) return null
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
     headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${token}` },
-  })
-  if (!response.ok) return null
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null)
+  if (!response?.ok) return null
   return ((await response.json()) as { id?: string }).id || null
 }
+
+const consumeQuota = async (
+  env: Env,
+  userId: string,
+  action: 'image_sign' | 'image_upload' | 'image_delete',
+  windowSeconds: number,
+  limit: number,
+) => {
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/consume_api_quota`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_user_id: userId,
+      p_action: action,
+      p_window_seconds: windowSeconds,
+      p_limit: limit,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null)
+  if (!response?.ok) return 'error'
+  return await response.json().catch(() => 'error') as string
+}
+
+const quotaError = (result: string, message: string) =>
+  result === 'limit' ? error(message, 429) : error('이미지 요청 한도를 확인하지 못했습니다.', 503)
 
 const encodeBase64Url = (bytes: ArrayBuffer) => {
   const value = String.fromCharCode(...new Uint8Array(bytes))
@@ -75,6 +110,18 @@ const createSignedUrl = async (request: Request, env: Env, path: string) => {
   return url.toString()
 }
 
+const createSignedUrls = async (request: Request, env: Env, userId: string) => {
+  const body = await request.json().catch(() => null) as { paths?: unknown } | null
+  const paths = Array.isArray(body?.paths)
+    ? [...new Set(body.paths.filter((path): path is string => typeof path === 'string'))]
+    : []
+  if (!paths.length || paths.length > 100 || paths.some((path) => !isOwnedPath(path, userId))) {
+    return error('유효하지 않은 이미지 경로입니다.')
+  }
+  const urls = await Promise.all(paths.map(async (path) => [path, await createSignedUrl(request, env, path)] as const))
+  return json({ urls: Object.fromEntries(urls) })
+}
+
 const isOwnedPath = (path: string, userId: string) =>
   path.startsWith(`${userId}/`) && path.length <= 1_000 && !path.includes('..') && !path.includes('\\')
 
@@ -93,6 +140,7 @@ const hasValidImageSignature = (bytes: ArrayBuffer, contentType: string) => {
 }
 
 const serveSignedImage = async (request: Request, env: Env, url: URL, path: string) => {
+  if (!path || path.length > 1_000 || path.includes('..') || path.includes('\\')) return error('유효하지 않은 이미지 주소입니다.', 401)
   const expires = Number(url.searchParams.get('expires') || 0)
   const signature = url.searchParams.get('signature') || ''
   if (!Number.isInteger(expires) || expires <= Math.floor(Date.now() / 1_000)) return error('이미지 주소가 만료되었습니다.', 401)
@@ -106,6 +154,8 @@ const serveSignedImage = async (request: Request, env: Env, url: URL, path: stri
     headers: {
       'Cache-Control': `private, max-age=${Math.max(0, expires - Math.floor(Date.now() / 1_000))}`,
       'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
+      'Referrer-Policy': 'no-referrer',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
       'X-Content-Type-Options': 'nosniff',
     },
   })
@@ -146,17 +196,36 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     return error('이미지 서버 설정이 완료되지 않았습니다.', 500)
   }
 
-  const url = new URL(request.url)
-  const path = url.searchParams.get('path') || ''
-  if (request.method === 'GET' && url.searchParams.has('signature')) return serveSignedImage(request, env, url, path)
+  try {
+    const url = new URL(request.url)
+    const path = url.searchParams.get('path') || ''
+    if (request.method === 'GET' && url.searchParams.has('signature')) return serveSignedImage(request, env, url, path)
 
-  const userId = await getUserId(env, request)
-  if (!userId) return error('로그인이 필요합니다.', 401)
-  if (request.method === 'POST') return uploadImage(request, env, userId)
-  if (request.method === 'DELETE') return deleteImages(request, env, userId)
-  if (request.method === 'GET') {
-    if (!isOwnedPath(path, userId)) return error('유효하지 않은 이미지 경로입니다.')
-    return json({ url: await createSignedUrl(request, env, path) })
+    const userId = await getUserId(env, request)
+    if (!userId) return error('로그인이 필요합니다.', 401)
+    if (request.method === 'POST') {
+      const contentType = request.headers.get('Content-Type') || ''
+      const quotaResult = contentType.toLowerCase().includes('application/json')
+        ? await consumeQuota(env, userId, 'image_sign', 3_600, 500)
+        : await consumeQuota(env, userId, 'image_upload', 86_400, 50)
+      if (quotaResult !== 'ok') return quotaError(quotaResult, '이미지 요청 한도에 도달했습니다.')
+      return contentType.toLowerCase().includes('application/json')
+        ? createSignedUrls(request, env, userId)
+        : uploadImage(request, env, userId)
+    }
+    if (request.method === 'DELETE') {
+      const quotaResult = await consumeQuota(env, userId, 'image_delete', 86_400, 100)
+      if (quotaResult !== 'ok') return quotaError(quotaResult, '이미지 삭제 요청 한도에 도달했습니다.')
+      return deleteImages(request, env, userId)
+    }
+    if (request.method === 'GET') {
+      const quotaResult = await consumeQuota(env, userId, 'image_sign', 3_600, 500)
+      if (quotaResult !== 'ok') return quotaError(quotaResult, '이미지 주소 요청 한도에 도달했습니다.')
+      if (!isOwnedPath(path, userId)) return error('유효하지 않은 이미지 경로입니다.')
+      return json({ url: await createSignedUrl(request, env, path) })
+    }
+    return new Response(null, { status: 405, headers: { ...jsonHeaders, Allow: 'GET, POST, DELETE, OPTIONS' } })
+  } catch {
+    return error('이미지 요청을 처리하지 못했습니다.', 502)
   }
-  return new Response(null, { status: 405, headers: { Allow: 'GET, POST, DELETE, OPTIONS' } })
 }

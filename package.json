@@ -8,6 +8,22 @@
     "ios": "npm --prefix apps/mobile run ios",
     "typecheck": "npm --prefix apps/mobile run typecheck && npm --prefix apps/mobile run typecheck:api",
     "build": "npm ci --prefix apps/mobile --ignore-scripts && npm run typecheck && node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
-    "deploy:check": "curl --fail --silent --show-error https://myrecipe-1im.pages.dev/api/import-recipe"
+    "deploy:check": "curl --fail --silent --show-error https://myrecipe-1im.pages.dev/api/import-recipe",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:reset": "supabase db reset",
+    "supabase:lint": "supabase db lint --local --level warning --fail-on error",
+    "supabase:migrations": "supabase migration list",
+    "supabase:migration:new": "supabase migration new",
+    "supabase:diff": "supabase db diff",
+    "supabase:pull": "supabase db pull",
+    "supabase:push:dry": "supabase db push --dry-run",
+    "supabase:push": "supabase db push",
+    "supabase:types": "supabase gen types typescript --local --schema public > apps/mobile/src/types/database.generated.ts",
+    "supabase:types:linked": "supabase gen types typescript --linked --schema public > apps/mobile/src/types/database.generated.ts"
+  },
+  "devDependencies": {
+    "supabase": "2.107.0"
   }
 }

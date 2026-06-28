@@ -1,22 +1,27 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Session } from '@supabase/supabase-js'
 import { useFonts } from 'expo-font'
+import { makeRedirectUri } from 'expo-auth-session'
 import { StatusBar } from 'expo-status-bar'
 import * as ImagePicker from 'expo-image-picker'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
+import * as WebBrowser from 'expo-web-browser'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
   FlatList,
   Image,
   ImageBackground,
   KeyboardAvoidingView,
+  Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -29,17 +34,19 @@ import {
 } from 'react-native'
 
 import { deleteAccount, importRecipeFromUrl } from './src/lib/apiClient'
-import { getFolderImage } from './src/lib/folderImages'
+import { categoryImagePresets, getFolderImage, getRandomCategoryImage } from './src/lib/folderImages'
 import { formatIngredientItems, parseIngredientText } from './src/lib/ingredients'
 import { getPremiumAccess } from './src/lib/premium'
 import { ensureRecipeFolders } from './src/lib/recipeFolders'
 import { legacyRecipeSelectColumns, normalizeRecipe, normalizeRecipeInput, recipeSelectColumns, toRecipeRow } from './src/lib/recipes'
-import { deleteImagePaths, getLegacyPublicImageUrl, hydrateRecipeImages, type LocalImageAsset, uploadRecipeImage, uploadRecipeStepImage } from './src/lib/storage'
+import { deleteImagePaths, getLegacyPublicImageUrl, hydrateFolderImages, hydrateRecipeImages, hydrateRecipeImagesBatch, type LocalImageAsset, uploadCategoryImage, uploadRecipeImage, uploadRecipeStepImage } from './src/lib/storage'
 import { hasSupabaseEnv, supabase } from './src/lib/supabaseClient'
 import { emptyRecipeInput, type IngredientItem, type Recipe, type RecipeFolder, type RecipeInput } from './src/types/recipe'
 
-type MainTab = 'recipes' | 'book' | 'calendar' | 'premium' | 'settings'
-type Screen = 'main' | 'detail' | 'form' | 'import'
+WebBrowser.maybeCompleteAuthSession()
+
+type MainTab = 'recipes' | 'book' | 'calendar' | 'create' | 'premium' | 'settings'
+type Screen = 'main' | 'detail' | 'form' | 'import' | 'categoryManager' | 'categoryForm'
 type AuthMode = 'login' | 'signup'
 type FormMode = 'new' | 'edit' | 'import'
 
@@ -59,15 +66,16 @@ const labels: Record<string, string> = { Easy: '쉬움', Medium: '보통', Hard:
 const tabs: Array<{ key: MainTab; label: string }> = [
   { key: 'recipes', label: '홈' },
   { key: 'book', label: '레시피북' },
-  { key: 'calendar', label: '캘린더' },
+  { key: 'create', label: '레시피 추가' },
+  { key: 'calendar', label: '식사 기록' },
   { key: 'premium', label: '프리미엄' },
-  { key: 'settings', label: '설정' },
 ]
 
 const tabIcons: Record<MainTab, string> = {
   recipes: '⌂',
   book: '▤',
-  calendar: '□',
+  calendar: '▦',
+  create: '＋',
   premium: '◇',
   settings: '⚙',
 }
@@ -80,6 +88,48 @@ const toDateKey = (date: Date) => {
 }
 
 const mealStorageKey = (userId: string) => `myrecipe:meal-calendar:${userId}`
+const folderOrderStorageKey = (userId: string) => `myrecipe:folder-order:${userId}`
+const processedAuthCodes = new Set<string>()
+
+const getAuthRedirectUrl = () => makeRedirectUri({ scheme: 'myrecipenote', path: 'auth/callback' })
+
+const exchangeAuthCodeFromUrl = async (callback: string) => {
+  const redirectTo = getAuthRedirectUrl()
+  const callbackUrl = new URL(callback)
+  const expectedCallbackUrl = new URL(redirectTo)
+  if (
+    callbackUrl.protocol !== expectedCallbackUrl.protocol
+    || callbackUrl.host !== expectedCallbackUrl.host
+    || callbackUrl.pathname !== expectedCallbackUrl.pathname
+  ) {
+    throw new Error('인증 콜백 주소가 올바르지 않습니다.')
+  }
+
+  const errorDescription = callbackUrl.searchParams.get('error_description')
+  if (errorDescription) throw new Error(errorDescription)
+  const code = callbackUrl.searchParams.get('code')
+  if (!code) throw new Error('인증 응답에 인증 코드가 없습니다.')
+  if (processedAuthCodes.has(code)) return
+
+  processedAuthCodes.add(code)
+  const { error } = await supabase.auth.exchangeCodeForSession(code)
+  if (error) {
+    processedAuthCodes.delete(code)
+    throw error
+  }
+}
+
+const sortFoldersByStoredOrder = (folders: RecipeFolder[], rawOrder: string | null) => {
+  if (!rawOrder) return folders
+  try {
+    const order = JSON.parse(rawOrder) as unknown
+    if (!Array.isArray(order)) return folders
+    const positions = new Map(order.filter((id): id is string => typeof id === 'string').map((id, index) => [id, index]))
+    return [...folders].sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+  } catch {
+    return folders
+  }
+}
 
 const makeId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -107,12 +157,12 @@ const isMissingPrivateImageColumnsError = (error: { code?: string; message?: str
   error?.code === 'PGRST204' && /image_path|step_image_paths/i.test(error.message || '')
 
 const toLegacyRecipeRow = (recipe: RecipeInput) => {
-  const { image_path, step_image_paths, ...row } = recipe
+  const { image_path, step_image_paths: _stepImagePaths, ...row } = toRecipeRow(recipe)
   return {
     ...row,
     image_url: image_path ? getLegacyPublicImageUrl(image_path) : recipe.image_url || null,
     step_images: recipe.step_images.map((url, index) => {
-      const path = step_image_paths[index]
+      const path = recipe.step_image_paths[index]
       return path ? getLegacyPublicImageUrl(path) : url
     }),
   }
@@ -167,9 +217,25 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [formMode, setFormMode] = useState<FormMode>('new')
   const [formInitialValue, setFormInitialValue] = useState<RecipeInput | null>(null)
+  const [formInitialFolderId, setFormInitialFolderId] = useState<string | null>(null)
+  const [editingFolder, setEditingFolder] = useState<RecipeFolder | null>(null)
   const [notice, setNotice] = useState('')
 
   const user = session?.user ?? null
+
+  useEffect(() => {
+    const handleAuthUrl = (url: string) => {
+      if (!url.startsWith('myrecipenote://auth/callback')) return
+      void exchangeAuthCodeFromUrl(url).catch((error) => {
+        setNotice(error instanceof Error ? error.message : '인증 링크를 처리하지 못했습니다.')
+      })
+    }
+    void Linking.getInitialURL().then((url) => {
+      if (url) handleAuthUrl(url)
+    })
+    const subscription = Linking.addEventListener('url', ({ url }) => handleAuthUrl(url))
+    return () => subscription.remove()
+  }, [])
   const selectedRecipe = useMemo(() => recipes.find((recipe) => recipe.id === selectedId) || null, [recipes, selectedId])
 
   useEffect(() => {
@@ -229,12 +295,13 @@ export default function App() {
     if (!user) return
     setLoading(true)
     try {
-      let [recipeResult, itemResult, nextFolders, premium, rawMeals] = await Promise.all([
+      let [recipeResult, itemResult, nextFolders, premium, rawMeals, rawFolderOrder] = await Promise.all([
         supabase.from('recipes').select(recipeSelectColumns).order('created_at', { ascending: false }),
         supabase.from('recipe_folder_items').select('folder_id, recipe_id'),
         ensureRecipeFolders(user.id),
         getPremiumAccess(user.id).catch(() => false),
         AsyncStorage.getItem(mealStorageKey(user.id)),
+        AsyncStorage.getItem(folderOrderStorageKey(user.id)),
       ])
 
       if (isMissingPrivateImageColumnsError(recipeResult.error)) {
@@ -274,10 +341,10 @@ export default function App() {
       if (mealResult.error && !isMissingMealTableError(mealResult.error)) throw new Error(mealResult.error.message)
       if (isMissingMealTableError(mealResult.error)) useLocalMeals = true
 
-      const nextRecipes = await Promise.all((recipeResult.data || []).map((recipe) => hydrateRecipeImages(normalizeRecipe(recipe as Partial<Recipe>))))
+      const nextRecipes = await hydrateRecipeImagesBatch((recipeResult.data || []).map(normalizeRecipe))
       setRecipes(nextRecipes)
       setFolderItems((itemResult.data || []) as FolderItem[])
-      setFolders(nextFolders)
+      setFolders(sortFoldersByStoredOrder(await hydrateFolderImages(nextFolders), rawFolderOrder))
       setHasPremium(premium)
       setMeals(useLocalMeals ? localMeals : (mealResult.data || []).map((entry) => ({
         id: entry.client_id,
@@ -302,19 +369,27 @@ export default function App() {
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!session) return false
-      if (screen === 'main') return true
+      if (screen === 'main') {
+        if (tab !== 'recipes') {
+          setTab('recipes')
+          return true
+        }
+        return true
+      }
       if (screen === 'detail') {
         setScreen('main')
         setSelectedId(null)
       } else if (screen === 'form' && formMode === 'edit') {
         setScreen('detail')
+      } else if (screen === 'categoryForm') {
+        setScreen('categoryManager')
       } else {
         setScreen('main')
       }
       return true
     })
     return () => subscription.remove()
-  }, [formMode, screen, session])
+  }, [formMode, screen, session, tab])
 
   const saveMeals = async (nextMeals: MealEntry[]) => {
     if (!user) return
@@ -366,18 +441,65 @@ export default function App() {
     setScreen('detail')
   }
 
-  const openNewRecipe = () => {
+  const openNewRecipe = (folderId: string | null = null) => {
     setFormMode('new')
     setSelectedId(null)
+    setFormInitialFolderId(folderId)
     setFormInitialValue(emptyRecipeInput())
     setScreen('form')
   }
 
+  const openCategoryManager = () => setScreen('categoryManager')
+
   const openEditRecipe = (recipe: Recipe) => {
     setFormMode('edit')
     setSelectedId(recipe.id)
+    setFormInitialFolderId(folderItems.find((item) => item.recipe_id === recipe.id)?.folder_id || null)
     setFormInitialValue(normalizeRecipeInput(recipe))
     setScreen('form')
+  }
+
+  const moveFolder = (folderId: string, targetIndex: number) => {
+    const index = folders.findIndex((folder) => folder.id === folderId)
+    const nextIndex = Math.max(0, Math.min(targetIndex, folders.length - 1))
+    if (index < 0 || index === nextIndex) return
+
+    const reordered = [...folders]
+    const [moved] = reordered.splice(index, 1)
+    reordered.splice(nextIndex, 0, moved)
+    const next = reordered.map((folder, position) => ({ ...folder, sort_order: position }))
+    setFolders(next)
+    if (!user) return
+
+    const folderIds = next.map((folder) => folder.id)
+    void AsyncStorage.setItem(folderOrderStorageKey(user.id), JSON.stringify(folderIds))
+    void (async () => {
+      const rpcResult = await supabase.rpc('reorder_recipe_folders', { p_folder_ids: folderIds })
+      if (!rpcResult.error) return
+
+      const rpcMissing = rpcResult.error.code === 'PGRST202'
+        || /reorder_recipe_folders|schema cache|function/i.test(rpcResult.error.message)
+      if (!rpcMissing) {
+        setNotice(`폴더 순서를 서버에 저장하지 못했습니다: ${rpcResult.error.message}`)
+        return
+      }
+
+      const fallbackResults = await Promise.all(next.map((folder, position) =>
+        supabase
+          .from('recipe_folders')
+          .update({ sort_order: position })
+          .eq('id', folder.id)
+          .eq('user_id', user.id),
+      ))
+      const fallbackError = fallbackResults.find((result) => result.error)?.error
+      if (!fallbackError) return
+
+      if (fallbackError.code === 'PGRST204' || /sort_order|schema cache|column/i.test(fallbackError.message)) {
+        setNotice('서버 DB에 카테고리 순서 저장 기능이 아직 적용되지 않았습니다. Supabase 마이그레이션을 적용해주세요.')
+      } else {
+        setNotice(`폴더 순서를 서버에 저장하지 못했습니다: ${fallbackError.message}`)
+      }
+    })()
   }
 
   const saveRecipe = async (recipe: RecipeInput, imageAsset: LocalImageAsset | null, folderId: string | null, stepImageAssets: Array<LocalImageAsset | null>) => {
@@ -433,7 +555,7 @@ export default function App() {
         }
         const { data, error } = await writeRecipe(nextPayload, selectedRecipe.id)
         if (error) throw new Error(error.message)
-        const updated = await hydrateRecipeImages(normalizeRecipe(data as Partial<Recipe>))
+        const updated = await hydrateRecipeImages(normalizeRecipe(data))
         const retainedPaths = new Set([nextPayload.image_path, ...nextPayload.step_image_paths].filter(Boolean))
         const stalePaths = [selectedRecipe.image_path, ...selectedRecipe.step_image_paths].filter((path) => path && !retainedPaths.has(path))
         await deleteImagePaths(stalePaths).catch(() => undefined)
@@ -443,7 +565,7 @@ export default function App() {
       } else {
         const { data, error } = await writeRecipe(payload)
         if (error) throw new Error(error.message)
-        let created = normalizeRecipe(data as Partial<Recipe>)
+        let created = normalizeRecipe(data)
         createdRecipeId = created.id
         if (imageAsset || stepImageAssets.some(Boolean)) {
           const [image, stepImages] = await Promise.all([
@@ -471,7 +593,7 @@ export default function App() {
           })
           const { data: updated, error: updateError } = await writeRecipe(nextPayload, created.id)
           if (updateError) throw new Error(updateError.message)
-          created = await hydrateRecipeImages(normalizeRecipe(updated as Partial<Recipe>))
+          created = await hydrateRecipeImages(normalizeRecipe(updated))
         }
         setRecipes((current) => [created, ...current])
         setSelectedId(created.id)
@@ -629,8 +751,8 @@ export default function App() {
               loading={refreshing}
               onRefresh={refresh}
               onOpenRecipe={openRecipe}
-              onCreate={openNewRecipe}
               onImport={() => setScreen('import')}
+              onOpenSettings={() => setTab('settings')}
             />
           )}
           {tab === 'book' && (
@@ -639,15 +761,35 @@ export default function App() {
               folders={folders}
               folderItems={folderItems}
               onOpenRecipe={openRecipe}
+              onManageCategories={openCategoryManager}
               onReload={loadAll}
-              onNotice={setNotice}
+              onOpenSettings={() => setTab('settings')}
             />
           )}
           {tab === 'calendar' && (
-            <CalendarScreen recipes={recipes} meals={meals} onSaveMeals={saveMeals} onOpenRecipe={openRecipe} />
+            <CalendarScreen
+              recipes={recipes}
+              meals={meals}
+              onSaveMeals={saveMeals}
+              onOpenRecipe={openRecipe}
+              onOpenSettings={() => setTab('settings')}
+            />
+          )}
+          {tab === 'create' && (
+            <AddRecipeChoiceScreen
+              onClose={() => setTab('recipes')}
+              onManual={() => openNewRecipe()}
+              onImport={() => setScreen('import')}
+            />
           )}
           {tab === 'premium' && (
-            <PremiumScreen hasPremium={hasPremium} loading={loading} onActivate={activatePremium} onImport={() => setScreen('import')} />
+            <PremiumScreen
+              hasPremium={hasPremium}
+              loading={loading}
+              onActivate={activatePremium}
+              onImport={() => setScreen('import')}
+              onClose={() => setTab('recipes')}
+            />
           )}
           {tab === 'settings' && (
             <SettingsScreen
@@ -679,7 +821,7 @@ export default function App() {
         <RecipeFormScreen
           initialValue={formInitialValue}
           folders={folders}
-          initialFolderId={selectedId ? folderItems.find((item) => item.recipe_id === selectedId)?.folder_id || null : null}
+          initialFolderId={formInitialFolderId}
           submitLabel={formMode === 'edit' ? '수정 저장' : '저장'}
           loading={loading}
           onBack={() => (formMode === 'edit' ? setScreen('detail') : setScreen('main'))}
@@ -701,6 +843,38 @@ export default function App() {
             setFormMode('import')
             setFormInitialValue(recipe)
             setScreen('form')
+          }}
+          onNotice={setNotice}
+        />
+      )}
+
+      {screen === 'categoryManager' && (
+        <CategoryManagementScreen
+          folders={folders}
+          folderItems={folderItems}
+          onBack={() => setScreen('main')}
+          onAdd={() => {
+            setEditingFolder(null)
+            setScreen('categoryForm')
+          }}
+          onEdit={(folder) => {
+            setEditingFolder(folder)
+            setScreen('categoryForm')
+          }}
+          onMove={moveFolder}
+          onReload={loadAll}
+          onNotice={setNotice}
+        />
+      )}
+
+      {screen === 'categoryForm' && (
+        <CategoryFormScreen
+          editingFolder={editingFolder}
+          onBack={() => setScreen('categoryManager')}
+          onSaved={() => {
+            setEditingFolder(null)
+            setScreen('categoryManager')
+            void loadAll()
           }}
           onNotice={setNotice}
         />
@@ -732,11 +906,19 @@ function AuthScreen({ onNotice }: { onNotice: (message: string) => void }) {
       onNotice('이메일과 비밀번호를 입력해주세요.')
       return
     }
+    if (mode === 'signup' && (password.length < 10 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password))) {
+      onNotice('비밀번호는 10자 이상이며 영문 대문자, 소문자, 숫자를 포함해야 합니다.')
+      return
+    }
     setLoading(true)
     try {
       const result = mode === 'login'
         ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-        : await supabase.auth.signUp({ email: email.trim(), password })
+        : await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: { emailRedirectTo: getAuthRedirectUrl() },
+          })
       if (result.error) onNotice(result.error.message)
       else if (mode === 'signup') onNotice('가입을 완료했습니다. 이메일 확인 설정이 켜져 있다면 메일을 확인해주세요.')
     } catch {
@@ -749,6 +931,29 @@ function AuthScreen({ onNotice }: { onNotice: (message: string) => void }) {
   const openEmailForm = (nextMode: AuthMode) => {
     setMode(nextMode)
     setShowEmailForm(true)
+  }
+
+  const signInWithGoogle = async () => {
+    if (loading) return
+    setLoading(true)
+    try {
+      const redirectTo = getAuthRedirectUrl()
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo, skipBrowserRedirect: true },
+      })
+      if (error) throw error
+      if (!data.url) throw new Error('Google 로그인 주소를 생성하지 못했습니다.')
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
+      if (result.type !== 'success') return
+
+      await exchangeAuthCodeFromUrl(result.url)
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'Google 로그인에 실패했습니다.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -775,11 +980,12 @@ function AuthScreen({ onNotice }: { onNotice: (message: string) => void }) {
           <View style={styles.authActions}>
             <Pressable
               accessibilityRole="button"
-              style={({ pressed }) => [styles.googleButton, pressed && styles.authButtonPressed]}
-              onPress={() => onNotice('Google 로그인은 OAuth 설정 후 사용할 수 있습니다.')}
+              disabled={loading}
+              style={({ pressed }) => [styles.googleButton, pressed && styles.authButtonPressed, loading && styles.disabledButton]}
+              onPress={signInWithGoogle}
             >
               <Text style={styles.googleMark}>G</Text>
-              <Text style={styles.googleButtonLabel}>Google로 로그인</Text>
+              <Text style={styles.googleButtonLabel}>{loading ? '연결 중...' : 'Google로 로그인'}</Text>
             </Pressable>
 
             <View style={styles.authDivider}>
@@ -847,8 +1053,8 @@ function RecipeListScreen({
   loading,
   onRefresh,
   onOpenRecipe,
-  onCreate,
   onImport,
+  onOpenSettings,
 }: {
   recipes: Recipe[]
   folders: RecipeFolder[]
@@ -856,8 +1062,8 @@ function RecipeListScreen({
   loading: boolean
   onRefresh: () => void
   onOpenRecipe: (recipe: Recipe) => void
-  onCreate: () => void
   onImport: () => void
+  onOpenSettings: () => void
 }) {
   const [query, setQuery] = useState('')
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
@@ -885,7 +1091,7 @@ function RecipeListScreen({
             <Text style={styles.homeTopIconText}>☰</Text>
           </Pressable>
           <Text style={styles.homeLogo}>ReciPick</Text>
-          <View style={styles.homeTopIcon}><Text style={styles.homeTopIconText}>◌</Text></View>
+          <Pressable accessibilityLabel="설정" style={styles.homeTopIcon} onPress={onOpenSettings}><Text style={styles.homeSettingsIcon}>⚙</Text></Pressable>
         </View>
 
         <View style={styles.homeSearchWrap}>
@@ -957,9 +1163,6 @@ function RecipeListScreen({
         <View style={styles.homeBottomSpacer} />
       </ScrollView>
 
-      <Pressable style={({ pressed }) => [styles.homeFab, pressed && styles.authButtonPressed]} onPress={onCreate}>
-        <Text style={styles.homeFabLabel}>＋</Text>
-      </Pressable>
     </View>
   )
 }
@@ -1058,6 +1261,16 @@ function RecipeDetailScreen({
     }
   }
 
+  const openSource = async () => {
+    try {
+      const supported = await Linking.canOpenURL(recipe.source_url)
+      if (!supported) throw new Error('열 수 없는 URL입니다.')
+      await Linking.openURL(recipe.source_url)
+    } catch (error) {
+      Alert.alert('출처 열기 실패', error instanceof Error ? error.message : '출처를 열지 못했습니다.')
+    }
+  }
+
   const exportPdf = async () => {
     try {
       const ingredientRows = recipe.ingredients.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(`${item.amount}${item.unit}`)}</td></tr>`).join('')
@@ -1138,7 +1351,7 @@ function RecipeDetailScreen({
             )) : <Text style={styles.recipeDetailEmptyText}>등록된 조리 순서가 없습니다.</Text>}
           </View>
 
-          {!!recipe.source_url && <View style={styles.recipeDetailSource}><Text style={styles.recipeDetailSourceLabel}>출처</Text><Text selectable style={styles.recipeDetailSourceUrl}>{recipe.source_url}</Text></View>}
+          {!!recipe.source_url && <Pressable accessibilityRole="link" accessibilityLabel="출처 열기" style={({ pressed }) => [styles.recipeDetailSource, pressed && styles.authButtonPressed]} onPress={openSource}><Text style={styles.recipeDetailSourceLabel}>출처 열기 ↗</Text><Text style={styles.recipeDetailSourceUrl}>{recipe.source_url}</Text></Pressable>}
         </View>
       </ScrollView>
     </View>
@@ -1416,15 +1629,20 @@ function ImportScreen({
 }) {
   const [url, setUrl] = useState('')
   const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
 
   const submit = async () => {
     if (!url.trim()) return
+    setImportError('')
     setImporting(true)
     try {
       const data = await importRecipeFromUrl(url.trim(), accessToken)
+      if (data.import_notice) onNotice(data.import_notice)
       onImported(normalizeRecipeInput({ ...emptyRecipeInput(), ...data, source_url: data.source_url || url.trim(), source_type: 'imported' }))
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : '레시피 가져오기에 실패했습니다.')
+      const message = error instanceof Error ? error.message : '레시피 가져오기에 실패했습니다.'
+      setImportError(message)
+      onNotice(message)
     } finally {
       setImporting(false)
     }
@@ -1446,6 +1664,8 @@ function ImportScreen({
       <Text style={styles.title}>URL로 가져오기</Text>
       <Text style={styles.heroText}>권한이 있는 웹 레시피 URL을 정리 가능한 초안으로 가져옵니다.</Text>
       <Field label="Recipe URL" value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." />
+      {importing && <Text style={styles.importStatus}>페이지를 읽고 레시피를 정리하고 있습니다. 최대 1분 정도 걸릴 수 있습니다.</Text>}
+      {!!importError && <Text style={styles.importError}>{importError}</Text>}
       <PrimaryButton label={importing || loading ? '가져오는 중...' : '레시피 가져오기'} disabled={importing || loading || !url.trim()} onPress={submit} />
     </View>
   )
@@ -1456,21 +1676,20 @@ function RecipeBookScreen({
   folders,
   folderItems,
   onOpenRecipe,
+  onManageCategories,
   onReload,
-  onNotice,
+  onOpenSettings,
 }: {
   recipes: Recipe[]
   folders: RecipeFolder[]
   folderItems: FolderItem[]
   onOpenRecipe: (recipe: Recipe) => void
+  onManageCategories: () => void
   onReload: () => void
-  onNotice: (message: string) => void
+  onOpenSettings: () => void
 }) {
   const [activeFolderId, setActiveFolderId] = useState('')
-  const [showFavorites, setShowFavorites] = useState(false)
   const [query, setQuery] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editingFolder, setEditingFolder] = useState<RecipeFolder | null>(null)
 
   const activeFolderRecipeIds = useMemo(
     () => new Set(folderItems.filter((item) => item.folder_id === activeFolderId).map((item) => item.recipe_id)),
@@ -1481,12 +1700,11 @@ function RecipeBookScreen({
     const normalizedQuery = query.trim().toLowerCase()
     return recipes.filter((recipe) => {
       const inFolder = activeFolderId ? activeFolderRecipeIds.has(recipe.id) : true
-      const inFavorites = showFavorites ? recipe.is_favorite : true
-      if (!normalizedQuery) return inFolder && inFavorites
+      if (!normalizedQuery) return inFolder
       const matchesQuery = [recipe.title, recipe.memo, recipe.steps_text].join(' ').toLowerCase().includes(normalizedQuery)
-      return inFolder && inFavorites && matchesQuery
+      return inFolder && matchesQuery
     })
-  }, [activeFolderId, activeFolderRecipeIds, query, recipes, showFavorites])
+  }, [activeFolderId, activeFolderRecipeIds, query, recipes])
 
   const counts = useMemo(() => {
     const map = new Map<string, number>()
@@ -1494,51 +1712,27 @@ function RecipeBookScreen({
     return map
   }, [folderItems])
 
-  const deleteFolder = (folder: RecipeFolder) => {
-    Alert.alert('카테고리 삭제', '레시피는 삭제되지 않습니다.', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: async () => {
-          const { data: userResult } = await supabase.auth.getUser()
-          if (!userResult.user) {
-            onNotice('로그인이 필요합니다.')
-            return
-          }
-          const { error } = await supabase.from('recipe_folders').delete().eq('id', folder.id).eq('user_id', userResult.user.id)
-          if (error) onNotice(error.message)
-          else {
-            setActiveFolderId('')
-            onReload()
-          }
-        },
-      },
-    ])
-  }
-
   return (
     <View style={styles.flex}>
       <View style={styles.recipeBookTopBar}>
-        <Pressable accessibilityLabel="카테고리 관리" style={styles.recipeBookTopButton} onPress={() => { setEditingFolder(null); setModalOpen(true) }}><Text style={styles.recipeBookTopIcon}>☰</Text></Pressable>
+        <View style={styles.recipeBookTopButton} />
         <Text style={styles.recipeBookLogo}>ReciPick</Text>
-        <View style={styles.recipeBookTopButton}><Text style={styles.recipeBookTopIcon}>◌</Text></View>
+        <Pressable accessibilityLabel="설정" style={styles.recipeBookTopButton} onPress={onOpenSettings}><Text style={styles.recipeBookSettingsIcon}>⚙</Text></Pressable>
       </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipeBookCategories}>
-        <Pressable style={[styles.recipeBookCategory, !activeFolderId && !showFavorites && styles.recipeBookCategoryActive]} onPress={() => { setActiveFolderId(''); setShowFavorites(false) }}><Text style={[styles.recipeBookCategoryLabel, !activeFolderId && !showFavorites && styles.recipeBookCategoryLabelActive]}>전체</Text></Pressable>
-        <Pressable style={[styles.recipeBookCategory, showFavorites && styles.recipeBookCategoryActive]} onPress={() => { setShowFavorites(true); setActiveFolderId('') }}><Text style={[styles.recipeBookCategoryLabel, showFavorites && styles.recipeBookCategoryLabelActive]}>즐겨찾기</Text></Pressable>
-        {folders.map((folder) => (
-          <Pressable key={folder.id} style={[styles.recipeBookCategory, activeFolderId === folder.id && styles.recipeBookCategoryActive]} onPress={() => { setActiveFolderId(folder.id); setShowFavorites(false) }}>
-            <Text style={[styles.recipeBookCategoryLabel, activeFolderId === folder.id && styles.recipeBookCategoryLabelActive]}>{folder.name} · {counts.get(folder.id) || 0}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
 
       <View style={styles.recipeBookSearchWrap}>
         <Text style={styles.recipeBookSearchIcon}>⌕</Text>
         <TextInput value={query} onChangeText={setQuery} placeholder="레시피 제목을 입력하세요..." placeholderTextColor="#969793" style={styles.recipeBookSearchInput} />
       </View>
+
+      <ScrollView horizontal style={styles.recipeBookCategoryScroller} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipeBookCategories}>
+        <Pressable style={[styles.recipeBookCategory, !activeFolderId && styles.recipeBookCategoryActive]} onPress={() => setActiveFolderId('')}><Text style={[styles.recipeBookCategoryLabel, !activeFolderId && styles.recipeBookCategoryLabelActive]}>전체</Text></Pressable>
+        {folders.map((folder) => (
+          <Pressable key={folder.id} style={[styles.recipeBookCategory, activeFolderId === folder.id && styles.recipeBookCategoryActive]} onPress={() => setActiveFolderId(folder.id)}>
+            <Text style={[styles.recipeBookCategoryLabel, activeFolderId === folder.id && styles.recipeBookCategoryLabelActive]}>{folder.name} · {counts.get(folder.id) || 0}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
       <View style={styles.recipeBookListHeader}>
         <Text style={styles.recipeBookListTitle}>나의 레시피 목록</Text>
@@ -1554,16 +1748,9 @@ function RecipeBookScreen({
         ListEmptyComponent={<EmptyState title="레시피가 없습니다" message={query ? '다른 검색어를 입력해보세요.' : '이 카테고리에 저장된 레시피가 없습니다.'} />}
         renderItem={({ item }) => <RecipeBookRow recipe={item} onPress={() => onOpenRecipe(item)} />}
       />
-      <FolderModal
-        visible={modalOpen}
-        folders={folders}
-        editingFolder={editingFolder}
-        onEdit={setEditingFolder}
-        onDelete={deleteFolder}
-        onClose={() => setModalOpen(false)}
-        onSaved={() => { setModalOpen(false); setEditingFolder(null); onReload() }}
-        onNotice={onNotice}
-      />
+      <Pressable accessibilityLabel="카테고리 관리" style={({ pressed }) => [styles.recipeBookFab, pressed && styles.authButtonPressed]} onPress={onManageCategories}>
+        <Text style={styles.recipeBookFabIcon}>＋</Text>
+      </Pressable>
     </View>
   )
 }
@@ -1584,97 +1771,359 @@ function RecipeBookRow({ recipe, onPress }: { recipe: Recipe; onPress: () => voi
   )
 }
 
-function FolderModal({
-  visible,
-  folders,
-  editingFolder,
-  onEdit,
-  onDelete,
+function AddRecipeChoiceScreen({
   onClose,
-  onSaved,
+  onManual,
+  onImport,
+}: {
+  onClose: () => void
+  onManual: () => void
+  onImport: () => void
+}) {
+  return (
+    <View style={styles.addChoiceScreen}>
+      <View style={styles.addChoiceTopBar}>
+        <Pressable accessibilityLabel="닫기" style={styles.addChoiceTopButton} onPress={onClose}><Text style={styles.addChoiceCloseIcon}>×</Text></Pressable>
+        <Text style={styles.addChoiceLogo}>Add Recipe</Text>
+        <View style={styles.addChoiceTopButton} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.addChoiceContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.addChoiceHeading}>
+          <Text style={styles.addChoiceTitle}>새로운 레시피 추가</Text>
+          <Text style={styles.addChoiceSubtitle}>기록하고 싶은 레시피의 형태를 선택해주세요.</Text>
+        </View>
+
+        <Pressable style={({ pressed }) => [styles.addChoiceCard, pressed && styles.addChoiceCardPressed]} onPress={onManual}>
+          <View style={styles.addChoiceAccentTop} />
+          <View style={styles.addChoiceManualIcon}><Text style={styles.addChoiceIconText}>✎</Text></View>
+          <Text style={styles.addChoiceCardTitle}>직접 작성하기</Text>
+          <Text style={styles.addChoiceCardBody}>나만의 특별한 레시피를 차근차근 기록해보세요.</Text>
+          <View style={styles.addChoiceLinkRow}><Text style={styles.addChoiceLink}>WRITE MANUALLY</Text><Text style={styles.addChoiceArrow}>→</Text></View>
+        </Pressable>
+
+        <Pressable style={({ pressed }) => [styles.addChoiceCard, pressed && styles.addChoiceCardPressed]} onPress={onImport}>
+          <View style={styles.addChoiceAccentBottom} />
+          <View style={styles.addChoiceUrlIcon}><Text style={styles.addChoiceIconText}>↗</Text></View>
+          <Text style={styles.addChoiceCardTitle}>URL로 가져오기</Text>
+          <Text style={styles.addChoiceCardBody}>웹사이트 주소를 입력해 레시피를 간편하게 저장하세요.</Text>
+          <View style={styles.addChoiceLinkRow}><Text style={styles.addChoiceLink}>IMPORT FROM URL</Text><Text style={styles.addChoiceArrow}>→</Text></View>
+        </Pressable>
+      </ScrollView>
+    </View>
+  )
+}
+
+function CategoryManagementScreen({
+  folders,
+  folderItems,
+  onBack,
+  onAdd,
+  onEdit,
+  onMove,
+  onReload,
   onNotice,
 }: {
-  visible: boolean
   folders: RecipeFolder[]
-  editingFolder: RecipeFolder | null
-  onEdit: (folder: RecipeFolder | null) => void
-  onDelete: (folder: RecipeFolder) => void
-  onClose: () => void
-  onSaved: () => void
+  folderItems: FolderItem[]
+  onBack: () => void
+  onAdd: () => void
+  onEdit: (folder: RecipeFolder) => void
+  onMove: (folderId: string, targetIndex: number) => void
+  onReload: () => void
   onNotice: (message: string) => void
 }) {
-  const [name, setName] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const counts = useMemo(() => {
+    const map = new Map<string, number>()
+    folderItems.forEach((item) => map.set(item.folder_id, (map.get(item.folder_id) || 0) + 1))
+    return map
+  }, [folderItems])
 
-  useEffect(() => {
-    setName(editingFolder?.name || '')
-    setImageUrl(editingFolder?.image_url || '')
-  }, [editingFolder])
-
-  const save = async () => {
-    if (!name.trim()) return
-    let normalizedImageUrl: string | null = null
-    if (imageUrl.trim()) {
-      try {
-        const parsed = new URL(imageUrl.trim())
-        if (parsed.protocol !== 'https:') throw new Error()
-        normalizedImageUrl = parsed.toString().slice(0, 2_000)
-      } catch {
-        onNotice('카테고리 이미지는 https URL만 사용할 수 있습니다.')
-        return
-      }
-    }
-    const payload = { name: name.trim().slice(0, 100), image_url: normalizedImageUrl }
-    const { data: userResult } = await supabase.auth.getUser()
-    if (!userResult.user) {
-      onNotice('로그인이 필요합니다.')
-      return
-    }
-
-    let result = editingFolder
-      ? await supabase.from('recipe_folders').update(payload).eq('id', editingFolder.id).eq('user_id', userResult.user.id)
-      : await supabase.from('recipe_folders').insert({ ...payload, user_id: userResult.user.id })
-
-    if (result.error && result.error.message.toLowerCase().includes('image_url')) {
-      result = editingFolder
-        ? await supabase.from('recipe_folders').update({ name: payload.name }).eq('id', editingFolder.id).eq('user_id', userResult.user.id)
-        : await supabase.from('recipe_folders').insert({ name: payload.name, user_id: userResult.user.id })
-    }
-
-    if (result.error) {
-      onNotice(result.error.message)
-      return
-    }
-    onSaved()
+  const deleteFolder = (folder: RecipeFolder) => {
+    Alert.alert('카테고리 삭제', '카테고리에 담긴 레시피는 삭제되지 않습니다.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: async () => {
+          const { data: userResult } = await supabase.auth.getUser()
+          if (!userResult.user) {
+            onNotice('로그인이 필요합니다.')
+            return
+          }
+          const { error } = await supabase.from('recipe_folders').delete().eq('id', folder.id).eq('user_id', userResult.user.id)
+          if (error) onNotice(error.message)
+          else {
+            await deleteImagePaths([folder.image_path]).catch(() => undefined)
+            void onReload()
+          }
+        },
+      },
+    ])
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalPanel}>
-          <View style={styles.topBar}>
-            <Text style={styles.sectionTitle}>카테고리 관리</Text>
-            <Pressable style={styles.textButton} onPress={onClose}><Text style={styles.textButtonLabel}>닫기</Text></Pressable>
-          </View>
-          <Field label="이름" value={name} onChangeText={setName} placeholder="Quick Dinners" />
-          <Field label="이미지 URL" value={imageUrl} onChangeText={setImageUrl} autoCapitalize="none" />
-          <PrimaryButton label={editingFolder ? '수정 저장' : '새 카테고리 저장'} disabled={!name.trim()} onPress={save} />
-          <ScrollView style={styles.modalList}>
-            {folders.map((folder) => {
-              const image = getFolderImage(folder).image
-              return (
-                <View key={folder.id} style={styles.folderRow}>
-                  <Image source={{ uri: image }} style={styles.folderThumb} />
-                  <Text style={styles.folderName}>{folder.name}</Text>
-                  <Pressable style={styles.smallButton} onPress={() => onEdit(folder)}><Text style={styles.smallButtonLabel}>수정</Text></Pressable>
-                  <Pressable style={styles.deleteButton} onPress={() => onDelete(folder)}><Text style={styles.deleteButtonLabel}>삭제</Text></Pressable>
-                </View>
-              )
-            })}
-          </ScrollView>
-        </View>
+    <View style={styles.categoryManagerScreen}>
+      <View style={styles.categoryManagerTopBar}>
+        <Pressable accessibilityLabel="뒤로 가기" style={styles.categoryManagerTopButton} onPress={onBack}><Text style={styles.categoryManagerBackIcon}>‹</Text></Pressable>
+        <Text style={styles.categoryManagerTitle}>카테고리 관리</Text>
+        <View style={styles.categoryManagerTopButton} />
       </View>
-    </Modal>
+      <ScrollView scrollEnabled={!draggingId} contentContainerStyle={styles.categoryManagerContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.categoryManagerIntro}>레시피를 체계적으로 분류하기 위한 카테고리를 관리하세요. 순서를 변경하거나 상세 정보를 수정할 수 있습니다.</Text>
+        <Pressable style={({ pressed }) => [styles.categoryManagerAddButton, pressed && styles.authButtonPressed]} onPress={onAdd}>
+          <Text style={styles.categoryManagerAddIcon}>＋</Text>
+          <Text style={styles.categoryManagerAddLabel}>카테고리 추가</Text>
+        </Pressable>
+
+        <View style={styles.categoryManagerList}>
+          {folders.map((folder, index) => (
+            <DraggableCategoryRow
+              key={folder.id}
+              folder={folder}
+              index={index}
+              folderCount={folders.length}
+              recipeCount={counts.get(folder.id) || 0}
+              dragging={draggingId === folder.id}
+              onDragStart={() => setDraggingId(folder.id)}
+              onDragEnd={(targetIndex) => {
+                setDraggingId(null)
+                onMove(folder.id, targetIndex)
+              }}
+              onEdit={() => onEdit(folder)}
+              onDelete={() => deleteFolder(folder)}
+            />
+          ))}
+          {!folders.length && <EmptyState title="카테고리가 없습니다" message="첫 카테고리를 추가해 레시피를 정리해보세요." />}
+        </View>
+
+        <View style={styles.categoryManagerQuote}>
+          <Text style={styles.categoryManagerQuoteTitle}>Curated Organization</Text>
+          <Text style={styles.categoryManagerQuoteText}>“요리는 예술이며, 정리는 그 예술을 완성하는 틀입니다.”</Text>
+          <Text style={styles.categoryManagerQuoteBy}>— ReciPick Editorial Team</Text>
+        </View>
+      </ScrollView>
+    </View>
+  )
+}
+
+const categoryDragStep = 100
+
+function DraggableCategoryRow({
+  folder,
+  index,
+  folderCount,
+  recipeCount,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onEdit,
+  onDelete,
+}: {
+  folder: RecipeFolder
+  index: number
+  folderCount: number
+  recipeCount: number
+  dragging: boolean
+  onDragStart: () => void
+  onDragEnd: (targetIndex: number) => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const translateY = useRef(new Animated.Value(0)).current
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      translateY.setValue(0)
+      onDragStart()
+    },
+    onPanResponderMove: (_event, gesture) => translateY.setValue(gesture.dy),
+    onPanResponderRelease: (_event, gesture) => {
+      const offset = Math.round(gesture.dy / categoryDragStep)
+      const targetIndex = Math.max(0, Math.min(index + offset, folderCount - 1))
+      translateY.setValue(0)
+      onDragEnd(targetIndex)
+    },
+    onPanResponderTerminate: () => {
+      translateY.setValue(0)
+      onDragEnd(index)
+    },
+  }), [folderCount, index, onDragEnd, onDragStart, translateY])
+
+  return (
+    <Animated.View style={[styles.categoryManagerItem, dragging && styles.categoryManagerItemDragging, { transform: [{ translateY }, { scale: dragging ? 1.02 : 1 }] }]}>
+      <View accessibilityLabel={`${folder.name} 순서 이동`} accessibilityHint="잡고 위아래로 끌어 순서를 변경합니다" style={styles.categoryManagerDragHandle} {...panResponder.panHandlers}>
+        <Text style={styles.categoryManagerDragIcon}>☷</Text>
+      </View>
+      <Image source={{ uri: getFolderImage(folder).image }} style={styles.categoryManagerImage} />
+      <View style={styles.categoryManagerItemBody}>
+        <Text numberOfLines={1} style={styles.categoryManagerItemTitle}>{folder.name}</Text>
+        <Text style={styles.categoryManagerItemCount}>{recipeCount} RECIPES</Text>
+      </View>
+      <Pressable accessibilityLabel={`${folder.name} 수정`} style={styles.categoryManagerAction} onPress={onEdit}><Text style={styles.categoryManagerEditIcon}>✎</Text></Pressable>
+      <Pressable accessibilityLabel={`${folder.name} 삭제`} style={styles.categoryManagerAction} onPress={onDelete}><Text style={styles.categoryManagerDeleteIcon}>⌫</Text></Pressable>
+    </Animated.View>
+  )
+}
+
+function CategoryFormScreen({
+  editingFolder,
+  onBack,
+  onSaved,
+  onNotice,
+}: {
+  editingFolder: RecipeFolder | null
+  onBack: () => void
+  onSaved: () => void
+  onNotice: (message: string) => void
+}) {
+  const [name, setName] = useState(editingFolder?.name || '')
+  const [description, setDescription] = useState(editingFolder?.description || '')
+  const [imageAsset, setImageAsset] = useState<LocalImageAsset | null>(null)
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(() => {
+    const existingImage = editingFolder?.image_url || ''
+    if (categoryImagePresets.includes(existingImage)) return existingImage
+    return existingImage ? null : getRandomCategoryImage()
+  })
+  const [saving, setSaving] = useState(false)
+
+  const pickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!permission.granted) {
+      onNotice('카테고리 사진을 선택하려면 사진 접근 권한이 필요합니다.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.9,
+    })
+    if (result.canceled) return
+    const asset = result.assets[0]
+    setImageAsset({ uri: asset.uri, fileName: asset.fileName, mimeType: asset.mimeType })
+    setSelectedPreset(null)
+  }
+
+  const save = async () => {
+    const normalizedName = name.trim()
+    if (!normalizedName || saving) return
+    setSaving(true)
+    let uploadedPath = ''
+    try {
+      const { data: userResult } = await supabase.auth.getUser()
+      if (!userResult.user) throw new Error('로그인이 필요합니다.')
+
+      let imageUrl: string | null = selectedPreset || editingFolder?.image_path || editingFolder?.image_url || getRandomCategoryImage()
+      if (imageAsset) {
+        const uploaded = await uploadCategoryImage(userResult.user.id, imageAsset)
+        uploadedPath = uploaded.path
+        imageUrl = uploaded.path
+      }
+
+      const payload = {
+        name: normalizedName.slice(0, 100),
+        image_url: imageUrl,
+        description: description.trim().slice(0, 500) || null,
+      }
+      let result = editingFolder
+        ? await supabase.from('recipe_folders').update(payload).eq('id', editingFolder.id).eq('user_id', userResult.user.id)
+        : await supabase.from('recipe_folders').insert({ ...payload, user_id: userResult.user.id })
+      if (result.error && /description/i.test(result.error.message)) {
+        const { description: _description, ...legacyPayload } = payload
+        result = editingFolder
+          ? await supabase.from('recipe_folders').update(legacyPayload).eq('id', editingFolder.id).eq('user_id', userResult.user.id)
+          : await supabase.from('recipe_folders').insert({ ...legacyPayload, user_id: userResult.user.id })
+      }
+      if (result.error) throw new Error(result.error.message)
+      if (editingFolder?.image_path && editingFolder.image_path !== imageUrl) {
+        await deleteImagePaths([editingFolder.image_path]).catch(() => undefined)
+      }
+      onSaved()
+    } catch (error) {
+      if (uploadedPath) await deleteImagePaths([uploadedPath]).catch(() => undefined)
+      onNotice(error instanceof Error ? error.message : '카테고리를 저장하지 못했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const previewImage = imageAsset?.uri || selectedPreset || editingFolder?.image_url || categoryImagePresets[0]
+
+  return (
+    <KeyboardAvoidingView style={styles.categoryFormScreen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.categoryFormTopBar}>
+        <Pressable accessibilityLabel="뒤로 가기" style={styles.categoryFormTopButton} onPress={onBack}><Text style={styles.categoryFormBackIcon}>‹</Text></Pressable>
+        <Text style={styles.categoryFormTitle}>{editingFolder ? '카테고리 편집' : '카테고리 추가'}</Text>
+        <View style={styles.categoryFormTopButton} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.categoryFormContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <Pressable style={styles.categoryImagePicker} onPress={pickImage}>
+          <Image source={{ uri: previewImage }} style={styles.categoryImagePreview} />
+          <View style={styles.categoryImageChangeBadge}>
+            <Text style={styles.categoryImageChangeBadgeText}>내 사진으로 변경</Text>
+          </View>
+        </Pressable>
+
+        <View style={styles.categoryPresetHeader}>
+          <View>
+            <Text style={styles.categoryPresetTitle}>기본 이미지 선택</Text>
+            <Text style={styles.categoryPresetDescription}>새 카테고리에는 샘플 이미지가 자동으로 지정됩니다.</Text>
+          </View>
+          <Pressable
+            style={styles.categoryPresetRandomButton}
+            onPress={() => {
+              setImageAsset(null)
+              setSelectedPreset(getRandomCategoryImage(selectedPreset))
+            }}
+          >
+            <Text style={styles.categoryPresetRandomLabel}>무작위</Text>
+          </Pressable>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryPresetList}>
+          {categoryImagePresets.map((image, index) => (
+            <Pressable
+              key={image}
+              accessibilityLabel={`기본 이미지 ${index + 1} 선택`}
+              style={[styles.categoryPresetItem, selectedPreset === image && styles.categoryPresetItemSelected]}
+              onPress={() => {
+                setImageAsset(null)
+                setSelectedPreset(image)
+              }}
+            >
+              <Image source={{ uri: image.replace('w=900', 'w=240') }} style={styles.categoryPresetImage} />
+              {selectedPreset === image && <View style={styles.categoryPresetCheck}><Text style={styles.categoryPresetCheckText}>✓</Text></View>}
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <View style={styles.categoryField}>
+          <Text style={styles.categoryFieldLabel}>카테고리 이름</Text>
+          <TextInput value={name} onChangeText={setName} maxLength={100} placeholder="예: 할머니의 일요일 만찬" placeholderTextColor="#b0b1ae" style={styles.categoryNameInput} />
+        </View>
+
+        <View style={styles.categoryField}>
+          <Text style={styles.categoryFieldLabel}>설명 (선택사항)</Text>
+          <TextInput value={description} onChangeText={setDescription} maxLength={500} multiline placeholder="이 카테고리에 대한 짧은 이야기를 들려주세요..." placeholderTextColor="#8e918e" style={styles.categoryDescriptionInput} />
+        </View>
+
+        <View style={styles.categoryDecoration}>
+          <View style={styles.categoryDecorationLine} />
+          <Text style={styles.categoryDecorationIcon}>♨</Text>
+          <View style={styles.categoryDecorationLine} />
+        </View>
+      </ScrollView>
+
+      <View style={styles.categoryFormFooter}>
+        <Pressable style={styles.categoryCancelButton} onPress={onBack}><Text style={styles.categoryCancelLabel}>취소</Text></Pressable>
+        <Pressable style={[styles.categorySaveButton, (!name.trim() || saving) && styles.disabledButton]} disabled={!name.trim() || saving} onPress={save}>
+          <Text style={styles.categorySaveLabel}>{saving ? '저장 중...' : editingFolder ? '수정 저장하기' : '저장하기'}</Text>
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
   )
 }
 
@@ -1683,11 +2132,13 @@ function CalendarScreen({
   meals,
   onSaveMeals,
   onOpenRecipe,
+  onOpenSettings,
 }: {
   recipes: Recipe[]
   meals: MealEntry[]
   onSaveMeals: (meals: MealEntry[]) => void
   onOpenRecipe: (recipe: Recipe) => void
+  onOpenSettings: () => void
 }) {
   const [monthDate, setMonthDate] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
@@ -1703,17 +2154,23 @@ function CalendarScreen({
     const year = monthDate.getFullYear()
     const month = monthDate.getMonth()
     const firstDay = new Date(year, month, 1)
-    const lastDay = new Date(year, month + 1, 0)
-    const values: Array<{ key: string; label: string; muted: boolean; hasMeal: boolean }> = []
-    for (let index = 0; index < firstDay.getDay(); index += 1) values.push({ key: `blank-${index}`, label: '', muted: true, hasMeal: false })
-    for (let day = 1; day <= lastDay.getDate(); day += 1) {
-      const key = toDateKey(new Date(year, month, day))
-      values.push({ key, label: String(day), muted: false, hasMeal: mealDateSet.has(key) })
-    }
-    return values
+    const gridStart = new Date(year, month, 1 - firstDay.getDay())
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index)
+      const key = toDateKey(date)
+      return {
+        date,
+        key,
+        label: String(date.getDate()),
+        muted: date.getMonth() !== month,
+        hasMeal: mealDateSet.has(key),
+      }
+    })
   }, [mealDateSet, monthDate])
 
   const selectedEntries = useMemo(() => meals.filter((entry) => entry.date === selectedDate), [meals, selectedDate])
+  const selectedDateValue = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate])
+  const isToday = selectedDate === toDateKey(new Date())
   const filteredRecipes = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return recipes
@@ -1732,56 +2189,201 @@ function CalendarScreen({
     setModalOpen(false)
   }
   const removeEntry = (entryId: string) => onSaveMeals(meals.filter((entry) => entry.id !== entryId))
+  const changeMonth = (offset: number) => {
+    const currentSelected = new Date(`${selectedDate}T12:00:00`)
+    const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + offset, 1)
+    const lastDay = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()
+    const nextSelected = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), Math.min(currentSelected.getDate(), lastDay))
+    setMonthDate(nextMonth)
+    setSelectedDate(toDateKey(nextSelected))
+  }
+  const selectDay = (date: Date) => {
+    setSelectedDate(toDateKey(date))
+    if (date.getMonth() !== monthDate.getMonth() || date.getFullYear() !== monthDate.getFullYear()) {
+      setMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
+    }
+  }
 
   return (
-    <View style={styles.flex}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.kicker}>Meal Calendar</Text>
-          <Text style={styles.title}>{monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
+    <View style={styles.mealCalendarScreen}>
+      <View style={styles.mealCalendarTopBar}>
+        <View style={styles.homeTopIcon} />
+        <View style={styles.mealCalendarBrandWrap}>
+          <Text style={styles.mealCalendarBrand}>ReciPick</Text>
+          <Text style={styles.mealCalendarBrandSub}>MEAL LOG</Text>
         </View>
-        <View style={styles.rowActions}>
-          <Pressable style={styles.smallButton} onPress={() => setMonthDate((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}><Text style={styles.smallButtonLabel}>‹</Text></Pressable>
-          <Pressable style={styles.smallButton} onPress={() => setMonthDate((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}><Text style={styles.smallButtonLabel}>›</Text></Pressable>
-        </View>
+        <Pressable accessibilityLabel="설정" style={styles.homeTopIcon} onPress={onOpenSettings}>
+          <Text style={styles.homeSettingsIcon}>⚙</Text>
+        </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.screenPadded}>
-        <View style={styles.calendarGrid}>
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <Text key={day} style={styles.weekDay}>{day}</Text>)}
-          {days.map((day) => (
-            <Pressable key={day.key} disabled={day.muted} style={[styles.dayCell, selectedDate === day.key && styles.dayCellActive]} onPress={() => setSelectedDate(day.key)}>
-              <Text style={[styles.dayLabel, selectedDate === day.key && styles.dayLabelActive]}>{day.label}</Text>
-              {day.hasMeal && <View style={[styles.mealDot, selectedDate === day.key && styles.mealDotActive]} />}
+
+      <ScrollView contentContainerStyle={styles.mealCalendarContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.mealCalendarMonthHeader}>
+          <View>
+            <Text style={styles.mealCalendarEyebrow}>나의 식사 기록</Text>
+            <Text style={styles.mealCalendarMonth}>
+              {monthDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' })}
+            </Text>
+          </View>
+          <View style={styles.mealCalendarMonthActions}>
+            <Pressable accessibilityLabel="이전 달" style={styles.mealCalendarArrow} onPress={() => changeMonth(-1)}>
+              <Text style={styles.mealCalendarArrowText}>‹</Text>
             </Pressable>
-          ))}
-        </View>
-        <View style={styles.topBar}>
-          <Text style={styles.sectionTitle}>{selectedDate}</Text>
-          <Pressable style={styles.smallButtonPrimary} onPress={() => setModalOpen(true)}><Text style={styles.smallButtonPrimaryLabel}>추가</Text></Pressable>
-        </View>
-        {selectedEntries.length ? selectedEntries.map((entry) => (
-          <Pressable key={entry.id} style={styles.mealRow} onPress={() => {
-            const recipe = entry.recipeId ? recipesById.get(entry.recipeId) : null
-            if (recipe) onOpenRecipe(recipe)
-          }}>
-            <View style={styles.flex}><Text style={styles.cardTitle}>{entry.title}</Text><Text style={styles.cardMeta}>{entry.type === 'recipe' ? '저장된 레시피' : entry.note || '직접 입력'}</Text></View>
-            <Pressable style={styles.deleteButton} onPress={() => removeEntry(entry.id)}><Text style={styles.deleteButtonLabel}>삭제</Text></Pressable>
-          </Pressable>
-        )) : <EmptyState title="기록이 없습니다" message="오늘 먹은 레시피를 추가해보세요." />}
-      </ScrollView>
-      <Modal visible={modalOpen} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalPanel}>
-            <View style={styles.topBar}><Text style={styles.sectionTitle}>식단 추가</Text><Pressable style={styles.textButton} onPress={() => setModalOpen(false)}><Text style={styles.textButtonLabel}>닫기</Text></Pressable></View>
-            <Field label="레시피 검색" value={query} onChangeText={setQuery} />
-            <ScrollView style={styles.modalList}>
-              {filteredRecipes.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} onPress={() => addRecipeEntry(recipe)} />)}
-            </ScrollView>
-            <Field label="직접 입력" value={manualTitle} onChangeText={setManualTitle} placeholder="오늘 먹은 음식" />
-            <Field label="메모" value={manualNote} onChangeText={setManualNote} multiline />
-            <PrimaryButton label="직접 입력 추가" disabled={!manualTitle.trim()} onPress={addManualEntry} />
+            <Pressable accessibilityLabel="다음 달" style={styles.mealCalendarArrow} onPress={() => changeMonth(1)}>
+              <Text style={styles.mealCalendarArrowText}>›</Text>
+            </Pressable>
           </View>
         </View>
+
+        <View style={styles.mealCalendarCard}>
+          <View style={styles.mealCalendarGrid}>
+            {['일', '월', '화', '수', '목', '금', '토'].map((day) => (
+              <Text key={day} style={styles.mealCalendarWeekDay}>{day}</Text>
+            ))}
+          {days.map((day) => (
+              <Pressable
+                key={day.key}
+                accessibilityLabel={`${day.date.getMonth() + 1}월 ${day.label}일${day.hasMeal ? ', 식사 기록 있음' : ''}`}
+                style={styles.mealCalendarDayCell}
+                onPress={() => selectDay(day.date)}
+              >
+                <View style={[styles.mealCalendarDayCircle, selectedDate === day.key && styles.mealCalendarDayCircleActive]}>
+                  <Text style={[
+                    styles.mealCalendarDayLabel,
+                    day.muted && styles.mealCalendarDayLabelMuted,
+                    selectedDate === day.key && styles.mealCalendarDayLabelActive,
+                  ]}>
+                    {day.label}
+                  </Text>
+                </View>
+                {day.hasMeal && <View style={[styles.mealCalendarDot, selectedDate === day.key && styles.mealCalendarDotActive]} />}
+            </Pressable>
+          ))}
+          </View>
+        </View>
+
+        <View style={styles.mealLogSectionHeader}>
+          <View>
+            <Text style={styles.mealLogSectionTitle}>{isToday ? '오늘의 식사' : '이날의 식사'}</Text>
+            <Text style={styles.mealLogDate}>
+              {selectedDateValue.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })}
+            </Text>
+          </View>
+          <Pressable accessibilityLabel="식사 추가" style={styles.mealLogAddCircle} onPress={() => setModalOpen(true)}>
+            <Text style={styles.mealLogAddCircleText}>＋</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.mealLogList}>
+          {selectedEntries.map((entry) => {
+            const recipe = entry.recipeId ? recipesById.get(entry.recipeId) : undefined
+            return (
+              <Pressable
+                key={entry.id}
+                style={styles.mealLogCard}
+                onPress={() => recipe && onOpenRecipe(recipe)}
+              >
+                {recipe?.image_url ? (
+                  <Image source={{ uri: recipe.image_url }} style={styles.mealLogImage} />
+                ) : (
+                  <View style={styles.mealLogImageFallback}>
+                    <Text style={styles.mealLogImageFallbackText}>{entry.title.slice(0, 1) || '♨'}</Text>
+                  </View>
+                )}
+                <View style={styles.mealLogCardBody}>
+                  <Text style={styles.mealLogType}>{entry.type === 'recipe' ? '저장된 레시피' : '직접 기록'}</Text>
+                  <Text style={styles.mealLogTitle} numberOfLines={2}>{entry.title}</Text>
+                  {!!entry.note && <Text style={styles.mealLogNote} numberOfLines={2}>{entry.note}</Text>}
+                  {recipe && <Text style={styles.mealLogOpenHint}>레시피 보기  →</Text>}
+                </View>
+                <Pressable
+                  accessibilityLabel={`${entry.title} 기록 삭제`}
+                  hitSlop={8}
+                  style={styles.mealLogDelete}
+                  onPress={() => removeEntry(entry.id)}
+                >
+                  <Text style={styles.mealLogDeleteText}>×</Text>
+                </Pressable>
+              </Pressable>
+            )
+          })}
+
+          <Pressable style={styles.mealLogEmptyCard} onPress={() => setModalOpen(true)}>
+            <View style={styles.mealLogEmptyIcon}><Text style={styles.mealLogEmptyIconText}>＋</Text></View>
+            <Text style={styles.mealLogEmptyTitle}>{selectedEntries.length ? '식사 기록 더하기' : '먹은 음식 기록하기'}</Text>
+            {!selectedEntries.length && <Text style={styles.mealLogEmptyText}>저장된 레시피를 고르거나 직접 입력할 수 있어요.</Text>}
+          </Pressable>
+        </View>
+      </ScrollView>
+
+      <Modal visible={modalOpen} animationType="slide" transparent>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.mealLogModalPanel}>
+            <View style={styles.mealLogModalHandle} />
+            <View style={styles.mealLogModalHeader}>
+              <View>
+                <Text style={styles.mealLogModalEyebrow}>{selectedDateValue.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}</Text>
+                <Text style={styles.mealLogModalTitle}>무엇을 드셨나요?</Text>
+              </View>
+              <Pressable style={styles.mealLogModalClose} onPress={() => setModalOpen(false)}>
+                <Text style={styles.mealLogModalCloseText}>×</Text>
+              </Pressable>
+            </View>
+
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="저장된 레시피 검색"
+              placeholderTextColor="#8b8f89"
+              style={styles.mealLogSearchInput}
+            />
+            <ScrollView style={styles.mealLogRecipeList} keyboardShouldPersistTaps="handled">
+              {filteredRecipes.length ? filteredRecipes.map((recipe) => (
+                <Pressable key={recipe.id} style={styles.mealLogRecipeOption} onPress={() => addRecipeEntry(recipe)}>
+                  {recipe.image_url ? (
+                    <Image source={{ uri: recipe.image_url }} style={styles.mealLogRecipeOptionImage} />
+                  ) : (
+                    <ImageFallback title={recipe.title} style={styles.mealLogRecipeOptionFallback} />
+                  )}
+                  <Text style={styles.mealLogRecipeOptionTitle} numberOfLines={2}>{recipe.title}</Text>
+                  <Text style={styles.mealLogRecipeOptionAdd}>＋</Text>
+                </Pressable>
+              )) : (
+                <Text style={styles.mealLogNoRecipe}>일치하는 레시피가 없습니다.</Text>
+              )}
+            </ScrollView>
+
+            <View style={styles.mealLogDivider}>
+              <View style={styles.mealLogDividerLine} />
+              <Text style={styles.mealLogDividerText}>또는 직접 입력</Text>
+              <View style={styles.mealLogDividerLine} />
+            </View>
+            <TextInput
+              value={manualTitle}
+              onChangeText={setManualTitle}
+              placeholder="예: 김치찌개와 밥"
+              placeholderTextColor="#9a9c98"
+              maxLength={200}
+              style={styles.mealLogManualInput}
+            />
+            <TextInput
+              value={manualNote}
+              onChangeText={setManualNote}
+              placeholder="메모 (선택사항)"
+              placeholderTextColor="#9a9c98"
+              maxLength={2000}
+              multiline
+              style={[styles.mealLogManualInput, styles.mealLogManualNote]}
+            />
+            <Pressable
+              style={[styles.mealLogSubmitButton, !manualTitle.trim() && styles.disabledButton]}
+              disabled={!manualTitle.trim()}
+              onPress={addManualEntry}
+            >
+              <Text style={styles.mealLogSubmitLabel}>식사 기록 추가</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   )
@@ -1792,32 +2394,152 @@ function PremiumScreen({
   loading,
   onActivate,
   onImport,
+  onClose,
 }: {
   hasPremium: boolean
   loading: boolean
   onActivate: (plan: 'monthly' | 'yearly') => void
   onImport: () => void
+  onClose: () => void
 }) {
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly')
+  const benefits = [
+    { icon: '∞', title: '무제한 레시피 저장', description: '한계 없이 쌓아가는 나만의 요리 아카이브' },
+    { icon: '▤', title: '무제한 레시피북 생성', description: '테마와 카테고리별로 정리하는 레시피 컬렉션' },
+    { icon: '↗', title: 'URL 레시피 자동 가져오기', description: '웹사이트 주소만으로 재료와 조리 과정을 간편하게 정리' },
+  ]
+  const submit = () => {
+    if (hasPremium) onImport()
+    else onActivate(selectedPlan)
+  }
+
   return (
-    <ScrollView contentContainerStyle={styles.screenPadded}>
-      <Text style={styles.kicker}>Premium</Text>
-      <Text style={styles.heroTitle}>URL 레시피 가져오기를 잠금 해제하세요</Text>
-      <Text style={styles.heroText}>웹사이트 레시피를 재료, 양념, 조리 과정으로 정리해 개인 레시피 초안으로 저장합니다.</Text>
-      <View style={styles.planCard}>
-        <Text style={styles.sectionTitle}>Yearly</Text>
-        <Text style={styles.price}>$19/year</Text>
-        <Text style={styles.cardMeta}>100 imports/30 days · 10 imports/day</Text>
-        <PrimaryButton label={hasPremium ? 'Premium Active' : loading ? '처리 중...' : 'Yearly 시작'} disabled={hasPremium || loading} onPress={() => onActivate('yearly')} />
+    <View style={styles.premiumScreen}>
+      <View style={styles.premiumTopBar}>
+        <Pressable accessibilityLabel="프리미엄 화면 닫기" style={styles.premiumCloseButton} onPress={onClose}>
+          <Text style={styles.premiumCloseText}>×</Text>
+        </Pressable>
+        <Text style={styles.premiumTopTitle}>Recipe Journal</Text>
+        <View style={styles.premiumCloseButton} />
       </View>
-      <View style={styles.planCard}>
-        <Text style={styles.sectionTitle}>Monthly</Text>
-        <Text style={styles.price}>$1.90/month</Text>
-        <Text style={styles.cardMeta}>100 imports/30 days · 10 imports/day</Text>
-        <PrimaryButton label={hasPremium ? 'Premium Active' : loading ? '처리 중...' : 'Monthly 시작'} disabled={hasPremium || loading} onPress={() => onActivate('monthly')} />
+
+      <ScrollView contentContainerStyle={styles.premiumContent} showsVerticalScrollIndicator={false}>
+        <ImageBackground
+          source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB4q-pf_OtjNk_T7pyd4EQ3pzVyB_KmDntRL9r4Eb-JEyqknNCHHH8SHnWpjwpk1w84dLd0-s0xAzbU_g04HPZSbPrQ7kKA7jQZMRVV-1pilIZneUsyzBC4Qyydk-7QcRO2aRWkiHgKKvFRoXL2U51-rwetKTH5OkxqpJaOmszPJYZ-fROfLUcdU1JZPAKSPM2EJkXGysjS3PU7td63Pmgi4Kia6hfp3Lcl3zm0y6KJGv18usSMRxawucTl0X8ijF6Y845K0XKaZH8' }}
+          style={styles.premiumHero}
+          imageStyle={styles.premiumHeroImage}
+        >
+          <View style={styles.premiumHeroOverlay} />
+          <View style={styles.premiumHeroCopy}>
+            <Text style={styles.premiumHeroEyebrow}>PREMIUM EXPERIENCE</Text>
+            <Text style={styles.premiumHeroTitle}>프리미엄으로 완성하는{'\n'}나만의 레시피 저널</Text>
+          </View>
+        </ImageBackground>
+
+        {hasPremium && (
+          <View style={styles.premiumActiveBanner}>
+            <Text style={styles.premiumActiveIcon}>✦</Text>
+            <View style={styles.premiumFlex}>
+              <Text style={styles.premiumActiveTitle}>Premium 이용 중</Text>
+              <Text style={styles.premiumActiveText}>모든 프리미엄 기능을 사용할 수 있습니다.</Text>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.premiumSection}>
+          <Text style={styles.premiumSectionTitle}>프리미엄 혜택</Text>
+          <View style={styles.premiumBenefits}>
+            {benefits.map((benefit) => (
+              <View key={benefit.title} style={styles.premiumBenefitCard}>
+                <View style={styles.premiumBenefitIcon}>
+                  <Text style={styles.premiumBenefitIconText}>{benefit.icon}</Text>
+                </View>
+                <View style={styles.premiumFlex}>
+                  <Text style={styles.premiumBenefitTitle}>{benefit.title}</Text>
+                  <Text style={styles.premiumBenefitText}>{benefit.description}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {!hasPremium && (
+          <View style={styles.premiumSection}>
+            <Text style={styles.premiumSectionTitle}>구독 요금제</Text>
+            <View style={styles.premiumPlans}>
+              <Pressable
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selectedPlan === 'yearly' }}
+                style={[styles.premiumPlanCard, selectedPlan === 'yearly' && styles.premiumPlanCardSelected]}
+                onPress={() => setSelectedPlan('yearly')}
+              >
+                <View style={styles.premiumPopularBadge}><Text style={styles.premiumPopularBadgeText}>가장 인기</Text></View>
+                <View style={styles.premiumPlanRow}>
+                  <View style={styles.premiumFlex}>
+                    <Text style={styles.premiumPlanTitle}>연간 구독</Text>
+                    <Text style={styles.premiumPlanCaption}>연 ₩49,000</Text>
+                  </View>
+                  <View style={styles.premiumPlanPriceWrap}>
+                    <Text style={styles.premiumPlanPriceGold}>₩4,083</Text>
+                    <Text style={styles.premiumPlanUnit}>월 환산 금액</Text>
+                  </View>
+                </View>
+                <View style={styles.premiumPlanDivider} />
+                <View style={styles.premiumPlanFooter}>
+                  <View style={[styles.premiumRadio, selectedPlan === 'yearly' && styles.premiumRadioSelected]}>
+                    {selectedPlan === 'yearly' && <View style={styles.premiumRadioDot} />}
+                  </View>
+                  <Text style={styles.premiumDiscount}>월간 구독 대비 약 30% 할인</Text>
+                </View>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selectedPlan === 'monthly' }}
+                style={[styles.premiumPlanCard, styles.premiumPlanCardMonthly, selectedPlan === 'monthly' && styles.premiumPlanCardSelected]}
+                onPress={() => setSelectedPlan('monthly')}
+              >
+                <View style={styles.premiumPlanRow}>
+                  <View style={styles.premiumFlex}>
+                    <Text style={styles.premiumPlanTitle}>월간 구독</Text>
+                    <Text style={styles.premiumPlanCaption}>언제든지 해지 가능</Text>
+                  </View>
+                  <View style={styles.premiumPlanPriceWrap}>
+                    <Text style={styles.premiumPlanPrice}>₩5,900</Text>
+                    <Text style={styles.premiumPlanUnit}>매월 결제</Text>
+                  </View>
+                </View>
+                <View style={styles.premiumPlanFooter}>
+                  <View style={[styles.premiumRadio, selectedPlan === 'monthly' && styles.premiumRadioSelected]}>
+                    {selectedPlan === 'monthly' && <View style={styles.premiumRadioDot} />}
+                  </View>
+                  <Text style={styles.premiumMonthlyHint}>부담 없이 시작해보세요</Text>
+                </View>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.premiumLimitNote}>
+          <Text style={styles.premiumLimitNoteIcon}>i</Text>
+          <Text style={styles.premiumLimitNoteText}>URL 가져오기는 안정적인 서비스 운영을 위해 하루 10회, 30일 기준 100회까지 제공됩니다.</Text>
+        </View>
+
+        <Text style={styles.premiumLegal}>
+          구독은 언제든지 설정에서 취소할 수 있습니다. 실제 결제 및 스토어 구독 연동은 출시 전에 적용됩니다.{'\n'}
+          이용약관  ·  개인정보처리방침
+        </Text>
+      </ScrollView>
+
+      <View style={styles.premiumCtaBar}>
+        <Pressable style={[styles.premiumCta, loading && styles.disabledButton]} disabled={loading} onPress={submit}>
+          <Text style={styles.premiumCtaLabel}>
+            {hasPremium ? 'URL 레시피 가져오기' : loading ? '처리 중...' : `${selectedPlan === 'yearly' ? '연간' : '월간'} 구독 시작하기`}
+          </Text>
+          <Text style={styles.premiumCtaSparkle}>✦</Text>
+        </Pressable>
       </View>
-      {hasPremium && <PrimaryButton label="URL 레시피 가져오기" onPress={onImport} />}
-      <Text style={styles.finePrint}>영상, SNS, 유료 콘텐츠 우회, 저작권 침해성 가져오기는 지원하지 않습니다.</Text>
-    </ScrollView>
+    </View>
   )
 }
 
@@ -1857,12 +2579,33 @@ function SettingsScreen({
 function TabBar({ active, onChange }: { active: MainTab; onChange: (tab: MainTab) => void }) {
   return (
     <View style={styles.tabBar}>
-      {tabs.map((item) => (
-        <Pressable key={item.key} style={[styles.tabButton, active === item.key && styles.tabButtonActive]} onPress={() => onChange(item.key)}>
-          <Text style={[styles.tabIcon, active === item.key && styles.tabLabelActive]}>{tabIcons[item.key]}</Text>
-          <Text style={[styles.tabLabel, active === item.key && styles.tabLabelActive]}>{item.label}</Text>
-        </Pressable>
-      ))}
+      {tabs.map((item) => {
+        const isCreate = item.key === 'create'
+        const isActive = active === item.key
+        return (
+          <Pressable
+            key={item.key}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isActive }}
+            style={[styles.tabButton, isActive && !isCreate && styles.tabButtonActive, isCreate && styles.tabCreateButton]}
+            onPress={() => onChange(item.key)}
+          >
+            {isCreate ? (
+              <>
+                <View style={[styles.tabCreateIcon, isActive && styles.tabCreateIconActive]}>
+                  <Text style={styles.tabCreateIconText}>＋</Text>
+                </View>
+                <Text style={[styles.tabCreateLabel, isActive && styles.tabLabelActive]}>레시피 추가</Text>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.tabIcon, isActive && styles.tabLabelActive]}>{tabIcons[item.key]}</Text>
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{item.label}</Text>
+              </>
+            )}
+          </Pressable>
+        )
+      })}
     </View>
   )
 }
@@ -1933,14 +2676,16 @@ function Notice({ message, onClear }: { message: string; onClear: () => void }) 
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#fff8f5' },
+  safeArea: { flex: 1, backgroundColor: '#faf9f6' },
   safeAreaDark: { backgroundColor: '#161612' },
-  flex: { flex: 1 },
+  flex: { flex: 1, backgroundColor: '#faf9f6' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   mutedText: { marginTop: 12, color: '#786a64', fontSize: 15 },
   kicker: { color: '#ec6f59', fontSize: 13, fontWeight: '800', letterSpacing: 0, textTransform: 'uppercase' },
   heroTitle: { marginTop: 8, color: '#2f211d', fontSize: 33, fontWeight: '900', lineHeight: 40 },
   heroText: { marginTop: 12, color: '#6f5f58', fontSize: 16, lineHeight: 24 },
+  importStatus: { marginTop: 14, borderRadius: 8, backgroundColor: '#f4f3f1', padding: 12, color: '#444748', fontSize: 14, lineHeight: 21 },
+  importError: { marginTop: 14, borderRadius: 8, backgroundColor: '#ffdad6', padding: 12, color: '#93000a', fontSize: 14, lineHeight: 21, fontWeight: '600' },
   authScreen: { flex: 1, backgroundColor: '#faf9f6' },
   authScrollContent: { flexGrow: 1, backgroundColor: '#faf9f6' },
   authHero: { height: 500, alignItems: 'center', justifyContent: 'center' },
@@ -1973,6 +2718,7 @@ const styles = StyleSheet.create({
   homeTopBar: { height: 58, marginHorizontal: -4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   homeTopIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   homeTopIconText: { color: '#181919', fontSize: 24, lineHeight: 28 },
+  homeSettingsIcon: { color: '#181919', fontSize: 22, lineHeight: 26 },
   homeLogo: { position: 'absolute', left: 52, right: 52, color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 28, fontWeight: '700', textAlign: 'center' },
   homeSearchWrap: { height: 52, marginTop: 14, borderWidth: 1, borderColor: '#c4c7c7', borderRadius: 12, backgroundColor: '#f4f3f1', flexDirection: 'row', alignItems: 'center', shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1 },
   homeSearchIcon: { width: 46, paddingLeft: 3, color: '#444748', fontSize: 26, textAlign: 'center' },
@@ -1997,8 +2743,6 @@ const styles = StyleSheet.create({
   homeCategoryTitle: { color: '#fff', fontSize: 19, lineHeight: 26, fontWeight: '700' },
   homeCategoryCount: { marginTop: 3, color: 'rgba(255,255,255,0.78)', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   homeBottomSpacer: { height: 112 },
-  homeFab: { position: 'absolute', right: 20, bottom: 84, width: 56, height: 56, borderRadius: 28, backgroundColor: '#775a19', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.24, shadowRadius: 9, elevation: 8 },
-  homeFabLabel: { color: '#fff', fontSize: 32, lineHeight: 36, fontWeight: '300' },
   recipeFormContent: { paddingHorizontal: 20, paddingBottom: 54, backgroundColor: '#faf9f6' },
   recipeFormTopBar: { height: 64, marginBottom: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   recipeFormTopIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
@@ -2137,8 +2881,10 @@ const styles = StyleSheet.create({
   recipeBookTopBar: { height: 60, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(250,249,246,0.96)' },
   recipeBookTopButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   recipeBookTopIcon: { color: '#181919', fontSize: 23, lineHeight: 27 },
+  recipeBookSettingsIcon: { color: '#181919', fontSize: 22, lineHeight: 26 },
   recipeBookLogo: { position: 'absolute', left: 62, right: 62, color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 28, lineHeight: 36, fontWeight: '700', textAlign: 'center' },
-  recipeBookCategories: { minHeight: 56, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8, gap: 10, alignItems: 'center' },
+  recipeBookCategoryScroller: { flexGrow: 0, height: 52 },
+  recipeBookCategories: { height: 52, paddingHorizontal: 20, paddingVertical: 8, gap: 10, alignItems: 'center' },
   recipeBookCategory: { minHeight: 36, borderWidth: 1, borderColor: 'rgba(116,120,120,0.28)', borderRadius: 18, paddingHorizontal: 17, alignItems: 'center', justifyContent: 'center' },
   recipeBookCategoryActive: { borderColor: '#181919', backgroundColor: '#181919' },
   recipeBookCategoryLabel: { color: '#5f625f', fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 0.5 },
@@ -2146,7 +2892,7 @@ const styles = StyleSheet.create({
   recipeBookSearchWrap: { height: 50, marginHorizontal: 20, marginTop: 16, borderRadius: 12, backgroundColor: '#f4f3f1', flexDirection: 'row', alignItems: 'center' },
   recipeBookSearchIcon: { width: 46, paddingLeft: 2, color: '#5f625f', fontSize: 25, lineHeight: 28, textAlign: 'center' },
   recipeBookSearchInput: { flex: 1, height: '100%', paddingRight: 15, color: '#1a1c1a', fontSize: 15 },
-  recipeBookListHeader: { marginTop: 30, marginBottom: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  recipeBookListHeader: { marginTop: 22, marginBottom: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   recipeBookListTitle: { color: '#181919', fontSize: 22, lineHeight: 30, fontWeight: '700' },
   recipeBookListCount: { color: '#737572', fontSize: 11, lineHeight: 16, fontWeight: '700', letterSpacing: 0.5 },
   recipeBookListContent: { paddingHorizontal: 20, paddingBottom: 110, gap: 10 },
@@ -2160,6 +2906,94 @@ const styles = StyleSheet.create({
   recipeBookRowMeta: { marginTop: 9, flexDirection: 'row', flexWrap: 'wrap', gap: 13 },
   recipeBookRowMetaText: { color: '#666966', fontSize: 12, lineHeight: 17, fontWeight: '500' },
   recipeBookChevron: { width: 22, color: 'rgba(116,120,120,0.45)', fontSize: 28, lineHeight: 32, textAlign: 'center' },
+  recipeBookFab: { position: 'absolute', right: 20, bottom: 88, zIndex: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#181919', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.22, shadowRadius: 9, elevation: 8 },
+  recipeBookFabIcon: { color: '#fff', fontSize: 31, lineHeight: 35, fontWeight: '300' },
+  addChoiceScreen: { flex: 1, backgroundColor: '#f4f3f1' },
+  addChoiceTopBar: { height: 64, paddingHorizontal: 20, backgroundColor: 'rgba(250,249,246,0.96)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  addChoiceTopButton: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
+  addChoiceCloseIcon: { color: '#181919', fontSize: 31, lineHeight: 35, fontWeight: '300' },
+  addChoiceLogo: { color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 25, lineHeight: 33, fontWeight: '700' },
+  addChoiceContent: { paddingHorizontal: 20, paddingTop: 32, paddingBottom: 112, gap: 24 },
+  addChoiceHeading: { marginBottom: 12, alignItems: 'center' },
+  addChoiceTitle: { color: '#1a1c1a', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 28, lineHeight: 36, fontWeight: '700', textAlign: 'center' },
+  addChoiceSubtitle: { maxWidth: 300, marginTop: 8, color: '#444748', fontSize: 16, lineHeight: 24, textAlign: 'center' },
+  addChoiceCard: { minHeight: 232, borderWidth: 1, borderColor: 'transparent', borderRadius: 12, backgroundColor: '#faf9f6', padding: 24, overflow: 'hidden', shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 2 },
+  addChoiceCardPressed: { borderColor: '#c4c7c7', transform: [{ scale: 0.98 }] },
+  addChoiceAccentTop: { position: 'absolute', top: -64, right: -64, width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(119,90,25,0.06)' },
+  addChoiceAccentBottom: { position: 'absolute', left: -48, bottom: -48, width: 96, height: 96, borderRadius: 48, backgroundColor: 'rgba(224,229,204,0.5)' },
+  addChoiceManualIcon: { width: 48, height: 48, marginBottom: 16, borderRadius: 24, backgroundColor: '#181919', alignItems: 'center', justifyContent: 'center' },
+  addChoiceUrlIcon: { width: 48, height: 48, marginBottom: 16, borderRadius: 24, backgroundColor: '#775a19', alignItems: 'center', justifyContent: 'center' },
+  addChoiceIconText: { color: '#fff', fontSize: 24, lineHeight: 28 },
+  addChoiceCardTitle: { color: '#1a1c1a', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 32, fontWeight: '600' },
+  addChoiceCardBody: { marginTop: 4, color: '#444748', fontSize: 16, lineHeight: 24 },
+  addChoiceLinkRow: { marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addChoiceLink: { color: '#775a19', fontSize: 11, lineHeight: 16, fontWeight: '800', letterSpacing: 1.1 },
+  addChoiceArrow: { color: '#775a19', fontSize: 17, lineHeight: 20 },
+  categoryManagerScreen: { flex: 1, backgroundColor: '#faf9f6' },
+  categoryManagerTopBar: { height: 64, paddingHorizontal: 20, backgroundColor: 'rgba(250,249,246,0.96)', borderBottomWidth: 1, borderBottomColor: 'rgba(196,199,199,0.18)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  categoryManagerTopButton: { width: 32, height: 44, alignItems: 'center', justifyContent: 'center' },
+  categoryManagerBackIcon: { color: '#181919', fontSize: 34, lineHeight: 38 },
+  categoryManagerTitle: { color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 32, fontWeight: '600' },
+  categoryManagerContent: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 56 },
+  categoryManagerIntro: { color: '#444748', fontSize: 16, lineHeight: 25 },
+  categoryManagerAddButton: { height: 64, marginTop: 30, borderRadius: 12, backgroundColor: '#181919', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.16, shadowRadius: 8, elevation: 5 },
+  categoryManagerAddIcon: { color: '#fff', fontSize: 25, lineHeight: 28, fontWeight: '300' },
+  categoryManagerAddLabel: { color: '#fff', fontSize: 19, lineHeight: 26, fontWeight: '700' },
+  categoryManagerList: { marginTop: 28, gap: 14 },
+  categoryManagerItem: { minHeight: 86, borderWidth: 1, borderColor: 'rgba(196,199,199,0.24)', borderRadius: 12, backgroundColor: '#fff', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10, shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1 },
+  categoryManagerItemDragging: { zIndex: 20, borderColor: 'rgba(119,90,25,0.45)', shadowOpacity: 0.18, shadowRadius: 14, elevation: 10 },
+  categoryManagerDragHandle: { width: 28, height: 58, alignItems: 'center', justifyContent: 'center' },
+  categoryManagerDragIcon: { color: '#747878', fontSize: 25, lineHeight: 28, transform: [{ rotate: '90deg' }] },
+  categoryManagerImage: { width: 58, height: 58, borderRadius: 9, backgroundColor: '#efeeeb' },
+  categoryManagerItemBody: { flex: 1, minWidth: 0 },
+  categoryManagerItemTitle: { color: '#181919', fontSize: 18, lineHeight: 25, fontWeight: '700' },
+  categoryManagerItemCount: { marginTop: 3, color: '#747878', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.8 },
+  categoryManagerAction: { width: 34, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  categoryManagerEditIcon: { color: '#444748', fontSize: 19, lineHeight: 22 },
+  categoryManagerDeleteIcon: { color: '#ba1a1a', fontSize: 20, lineHeight: 23 },
+  categoryManagerQuote: { marginTop: 32, borderWidth: 1, borderColor: 'rgba(196,199,199,0.18)', borderRadius: 14, backgroundColor: '#f4f3f1', padding: 24 },
+  categoryManagerQuoteTitle: { marginBottom: 8, color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  categoryManagerQuoteText: { color: '#444748', fontSize: 14, lineHeight: 22, fontStyle: 'italic' },
+  categoryManagerQuoteBy: { marginTop: 5, color: 'rgba(68,71,72,0.6)', fontSize: 12, lineHeight: 18 },
+  categoryFormScreen: { flex: 1, backgroundColor: '#faf9f6' },
+  categoryFormTopBar: { height: 64, paddingHorizontal: 20, backgroundColor: 'rgba(250,249,246,0.96)', borderBottomWidth: 1, borderBottomColor: 'rgba(196,199,199,0.18)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  categoryFormTopButton: { width: 32, height: 44, alignItems: 'center', justifyContent: 'center' },
+  categoryFormBackIcon: { color: '#181919', fontSize: 34, lineHeight: 38 },
+  categoryFormTitle: { color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 32, fontWeight: '600' },
+  categoryFormContent: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 140 },
+  categoryImagePicker: { width: '100%', aspectRatio: 4 / 3, borderWidth: 2, borderStyle: 'dashed', borderColor: 'rgba(196,199,199,0.55)', borderRadius: 12, backgroundColor: '#f4f3f1', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  categoryImagePreview: { width: '100%', height: '100%' },
+  categoryImageChangeBadge: { position: 'absolute', right: 12, bottom: 12, minHeight: 34, paddingHorizontal: 13, borderRadius: 17, backgroundColor: 'rgba(24,25,25,0.82)', alignItems: 'center', justifyContent: 'center' },
+  categoryImageChangeBadgeText: { color: '#fff', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.4 },
+  categoryImagePlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 8 },
+  categoryImageIcon: { color: '#444748', fontSize: 40, lineHeight: 44, fontWeight: '300' },
+  categoryImageLabel: { color: '#444748', fontSize: 11, lineHeight: 16, fontWeight: '800', letterSpacing: 1.1 },
+  categoryImageHelp: { marginTop: 8, color: 'rgba(68,71,72,0.6)', fontSize: 11, lineHeight: 16, fontWeight: '700', letterSpacing: 0.6, textAlign: 'center' },
+  categoryPresetHeader: { marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  categoryPresetTitle: { color: '#1a1c1a', fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  categoryPresetDescription: { marginTop: 2, color: '#747878', fontSize: 10, lineHeight: 15 },
+  categoryPresetRandomButton: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, backgroundColor: '#e9e8e5', alignItems: 'center', justifyContent: 'center' },
+  categoryPresetRandomLabel: { color: '#444748', fontSize: 11, lineHeight: 15, fontWeight: '800' },
+  categoryPresetList: { paddingTop: 12, paddingBottom: 4, gap: 9 },
+  categoryPresetItem: { width: 72, height: 58, padding: 2, borderWidth: 1, borderColor: 'transparent', borderRadius: 10 },
+  categoryPresetItemSelected: { borderWidth: 2, borderColor: '#775a19' },
+  categoryPresetImage: { width: '100%', height: '100%', borderRadius: 7, backgroundColor: '#e3e2e0' },
+  categoryPresetCheck: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderWidth: 2, borderColor: '#faf9f6', borderRadius: 10, backgroundColor: '#775a19', alignItems: 'center', justifyContent: 'center' },
+  categoryPresetCheckText: { color: '#fff', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  categoryField: { marginTop: 32 },
+  categoryFieldLabel: { marginBottom: 8, color: '#775a19', fontSize: 11, lineHeight: 16, fontWeight: '800', letterSpacing: 1.1 },
+  categoryNameInput: { minHeight: 52, borderBottomWidth: 1, borderBottomColor: '#c4c7c7', paddingVertical: 8, color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 23, lineHeight: 31, fontWeight: '600' },
+  categoryDescriptionInput: { minHeight: 104, borderRadius: 8, backgroundColor: '#f4f3f1', paddingHorizontal: 16, paddingVertical: 14, color: '#1a1c1a', fontSize: 16, lineHeight: 24, textAlignVertical: 'top' },
+  categoryDecoration: { marginTop: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, opacity: 0.35 },
+  categoryDecorationLine: { width: 32, height: 1, backgroundColor: '#747878' },
+  categoryDecorationIcon: { color: '#444748', fontSize: 15, lineHeight: 18 },
+  categoryFormFooter: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 88, borderTopWidth: 1, borderTopColor: 'rgba(196,199,199,0.28)', backgroundColor: 'rgba(250,249,246,0.97)', paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', gap: 16 },
+  categoryCancelButton: { flex: 1, minHeight: 56, borderRadius: 8, backgroundColor: '#e9e8e5', alignItems: 'center', justifyContent: 'center' },
+  categoryCancelLabel: { color: '#1a1c1a', fontSize: 18, lineHeight: 24, fontWeight: '600' },
+  categorySaveButton: { flex: 2, minHeight: 56, borderRadius: 8, backgroundColor: '#181919', alignItems: 'center', justifyContent: 'center', shadowColor: '#181919', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 },
+  categorySaveLabel: { color: '#fff', fontSize: 18, lineHeight: 24, fontWeight: '600' },
+  simpleTopBar: { height: 60, paddingHorizontal: 16, backgroundColor: 'rgba(250,249,246,0.96)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  simpleTopBarTitle: { color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 25, lineHeight: 33, fontWeight: '700' },
   panel: { borderWidth: 1, borderColor: '#f0ddd5', borderRadius: 8, backgroundColor: '#fff', padding: 16, marginTop: 16 },
   header: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { color: '#2f211d', fontSize: 28, fontWeight: '900', lineHeight: 34 },
@@ -2197,7 +3031,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#2f211d', fontSize: 17, fontWeight: '900' },
   sectionBody: { marginTop: 8, color: '#4c3d38', fontSize: 16, lineHeight: 25 },
   formContent: { padding: 20, paddingBottom: 44 },
-  screenPadded: { padding: 20, paddingBottom: 112 },
+  screenPadded: { flexGrow: 1, padding: 20, paddingBottom: 112, backgroundColor: '#faf9f6' },
   field: { marginTop: 18 },
   fieldLabel: { marginBottom: 8, color: '#4c3d38', fontSize: 14, fontWeight: '900' },
   input: { minHeight: 50, borderWidth: 1, borderColor: '#f0ddd5', borderRadius: 8, backgroundColor: '#fff', paddingHorizontal: 14, color: '#2f211d', fontSize: 16, marginBottom: 10 },
@@ -2216,12 +3050,17 @@ const styles = StyleSheet.create({
   emptyMessage: { marginTop: 8, color: '#786a64', fontSize: 15, lineHeight: 22, textAlign: 'center' },
   notice: { position: 'absolute', left: 16, right: 16, bottom: 18, borderRadius: 8, backgroundColor: '#2f211d', paddingHorizontal: 14, paddingVertical: 12 },
   noticeText: { color: '#fff', fontSize: 14, fontWeight: '700', textAlign: 'center' },
-  tabBar: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 76, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(250,249,246,0.97)', borderTopWidth: 1, borderTopColor: 'rgba(196,199,199,0.3)', paddingHorizontal: 8, paddingBottom: 8, shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 12 },
-  tabButton: { flex: 1, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  tabBar: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 80, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(250,249,246,0.98)', borderTopWidth: 1, borderTopColor: 'rgba(196,199,199,0.3)', paddingHorizontal: 6, paddingBottom: 8, shadowColor: '#2d2d2d', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 12 },
+  tabButton: { flex: 1, minHeight: 56, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   tabButtonActive: { backgroundColor: 'rgba(254,212,136,0.24)' },
-  tabIcon: { marginBottom: 1, color: '#676a68', fontSize: 21, lineHeight: 24 },
-  tabLabel: { color: '#676a68', fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  tabIcon: { marginBottom: 1, color: '#676a68', fontSize: 22, lineHeight: 25 },
+  tabLabel: { color: '#676a68', fontSize: 9, fontWeight: '800', letterSpacing: 0.1 },
   tabLabelActive: { color: '#775a19' },
+  tabCreateButton: { minHeight: 72, marginTop: -20, justifyContent: 'flex-start' },
+  tabCreateIcon: { width: 50, height: 50, marginBottom: 2, borderWidth: 4, borderColor: '#faf9f6', borderRadius: 25, backgroundColor: '#181919', alignItems: 'center', justifyContent: 'center', shadowColor: '#181919', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.23, shadowRadius: 7, elevation: 8 },
+  tabCreateIconActive: { backgroundColor: '#775a19' },
+  tabCreateIconText: { marginTop: -3, color: '#fff', fontSize: 31, lineHeight: 34, fontWeight: '300' },
+  tabCreateLabel: { color: '#444748', fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.1 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   horizontalChips: { paddingHorizontal: 16, paddingBottom: 10, gap: 8 },
   chip: { minHeight: 38, borderRadius: 19, borderWidth: 1, borderColor: '#f0ddd5', backgroundColor: '#fff', paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
@@ -2232,21 +3071,129 @@ const styles = StyleSheet.create({
   imagePickerImage: { width: '100%', height: '100%' },
   imagePickerText: { color: '#bf523f', fontSize: 16, fontWeight: '900' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(47,33,29,0.32)', justifyContent: 'flex-end' },
-  modalPanel: { maxHeight: '88%', backgroundColor: '#fff8f5', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 18 },
+  modalPanel: { maxHeight: '88%', backgroundColor: '#faf9f6', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 18 },
   modalList: { maxHeight: 280, marginVertical: 12 },
   folderRow: { flexDirection: 'row', alignItems: 'center', minHeight: 64, gap: 8, borderBottomWidth: 1, borderBottomColor: '#f0ddd5' },
   folderThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#f8e5dc' },
   folderName: { flex: 1, color: '#2f211d', fontSize: 16, fontWeight: '800' },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 20 },
-  weekDay: { width: '13.2%', textAlign: 'center', color: '#8a766e', fontSize: 12, fontWeight: '900', paddingVertical: 6 },
-  dayCell: { width: '13.2%', aspectRatio: 1, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#f0ddd5' },
-  dayCellActive: { backgroundColor: '#ec6f59', borderColor: '#ec6f59' },
-  dayLabel: { color: '#2f211d', fontSize: 14, fontWeight: '900' },
-  dayLabelActive: { color: '#fff' },
-  mealDot: { position: 'absolute', bottom: 5, width: 5, height: 5, borderRadius: 3, backgroundColor: '#ec6f59' },
-  mealDotActive: { backgroundColor: '#fff' },
-  mealRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72, borderRadius: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#f0ddd5', padding: 12, marginBottom: 10 },
-  planCard: { borderWidth: 1, borderColor: '#f0ddd5', borderRadius: 8, backgroundColor: '#fff', padding: 18, marginTop: 16 },
-  price: { color: '#2f211d', fontSize: 30, fontWeight: '900', marginTop: 8 },
-  finePrint: { marginTop: 18, color: '#8a766e', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  mealCalendarScreen: { flex: 1, backgroundColor: '#fcf9f8' },
+  mealCalendarTopBar: { height: 64, paddingHorizontal: 16, backgroundColor: 'rgba(252,249,248,0.98)', borderBottomWidth: 1, borderBottomColor: 'rgba(107,92,76,0.08)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mealCalendarBrandWrap: { alignItems: 'center' },
+  mealCalendarBrand: { color: '#334537', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 22, lineHeight: 27, fontWeight: '700' },
+  mealCalendarBrandSub: { marginTop: -2, color: '#6b5c4c', fontSize: 8, lineHeight: 11, fontWeight: '800', letterSpacing: 1.8 },
+  mealCalendarContent: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 120 },
+  mealCalendarMonthHeader: { marginBottom: 16, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  mealCalendarEyebrow: { marginBottom: 4, color: '#6b5c4c', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.2 },
+  mealCalendarMonth: { color: '#334537', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 27, lineHeight: 34, fontWeight: '600' },
+  mealCalendarMonthActions: { flexDirection: 'row', gap: 6 },
+  mealCalendarArrow: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0eded' },
+  mealCalendarArrowText: { marginTop: -3, color: '#334537', fontSize: 31, lineHeight: 34, fontWeight: '400' },
+  mealCalendarCard: { paddingHorizontal: 10, paddingTop: 14, paddingBottom: 10, borderWidth: 1, borderColor: 'rgba(107,92,76,0.10)', borderRadius: 14, backgroundColor: '#f6f3f2', shadowColor: '#6b5c4c', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+  mealCalendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  mealCalendarWeekDay: { width: '14.2857%', paddingBottom: 9, color: '#737872', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.8, textAlign: 'center' },
+  mealCalendarDayCell: { width: '14.2857%', height: 45, alignItems: 'center', justifyContent: 'flex-start' },
+  mealCalendarDayCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  mealCalendarDayCircleActive: { backgroundColor: '#334537' },
+  mealCalendarDayLabel: { color: '#1b1c1c', fontSize: 14, lineHeight: 18, fontWeight: '600' },
+  mealCalendarDayLabelMuted: { color: '#c3c8c1' },
+  mealCalendarDayLabelActive: { color: '#fff' },
+  mealCalendarDot: { width: 4, height: 4, marginTop: 3, borderRadius: 2, backgroundColor: '#6b5c4c' },
+  mealCalendarDotActive: { backgroundColor: '#334537' },
+  mealLogSectionHeader: { marginTop: 34, marginBottom: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(107,92,76,0.14)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mealLogSectionTitle: { color: '#334537', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 31, fontWeight: '600' },
+  mealLogDate: { marginTop: 3, color: '#737872', fontSize: 11, lineHeight: 16, fontWeight: '700', letterSpacing: 0.2 },
+  mealLogAddCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f4dfcb', alignItems: 'center', justifyContent: 'center' },
+  mealLogAddCircleText: { marginTop: -2, color: '#524436', fontSize: 26, lineHeight: 30, fontWeight: '400' },
+  mealLogList: { gap: 12 },
+  mealLogCard: { minHeight: 116, padding: 12, borderWidth: 1, borderColor: 'rgba(107,92,76,0.08)', borderRadius: 14, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 14, shadowColor: '#6b5c4c', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2 },
+  mealLogImage: { width: 92, height: 92, borderRadius: 10, backgroundColor: '#e4e2e1' },
+  mealLogImageFallback: { width: 92, height: 92, borderRadius: 10, backgroundColor: '#d3e8d5', alignItems: 'center', justifyContent: 'center' },
+  mealLogImageFallbackText: { color: '#394b3d', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 30, lineHeight: 38, fontWeight: '700' },
+  mealLogCardBody: { flex: 1, minHeight: 86, justifyContent: 'center' },
+  mealLogType: { marginBottom: 4, color: '#6b5c4c', fontSize: 9, lineHeight: 13, fontWeight: '800', letterSpacing: 1 },
+  mealLogTitle: { paddingRight: 20, color: '#1b1c1c', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 17, lineHeight: 23, fontWeight: '600' },
+  mealLogNote: { marginTop: 5, paddingRight: 8, color: '#737872', fontSize: 12, lineHeight: 17 },
+  mealLogOpenHint: { marginTop: 7, color: '#506354', fontSize: 10, lineHeight: 14, fontWeight: '800' },
+  mealLogDelete: { position: 'absolute', top: 7, right: 8, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  mealLogDeleteText: { color: '#8d918c', fontSize: 23, lineHeight: 26, fontWeight: '400' },
+  mealLogEmptyCard: { minHeight: 118, padding: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(115,120,114,0.38)', borderRadius: 14, backgroundColor: '#f6f3f2', alignItems: 'center', justifyContent: 'center' },
+  mealLogEmptyIcon: { width: 34, height: 34, marginBottom: 8, borderRadius: 17, borderWidth: 1, borderColor: '#737872', alignItems: 'center', justifyContent: 'center' },
+  mealLogEmptyIconText: { marginTop: -1, color: '#737872', fontSize: 22, lineHeight: 25 },
+  mealLogEmptyTitle: { color: '#434843', fontSize: 11, lineHeight: 16, fontWeight: '800', letterSpacing: 0.8 },
+  mealLogEmptyText: { marginTop: 5, color: '#737872', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  mealLogModalPanel: { maxHeight: '92%', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: '#fcf9f8' },
+  mealLogModalHandle: { width: 42, height: 4, marginBottom: 16, borderRadius: 2, backgroundColor: '#c3c8c1', alignSelf: 'center' },
+  mealLogModalHeader: { marginBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  mealLogModalEyebrow: { marginBottom: 3, color: '#6b5c4c', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1 },
+  mealLogModalTitle: { color: '#334537', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 31, fontWeight: '600' },
+  mealLogModalClose: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f0eded', alignItems: 'center', justifyContent: 'center' },
+  mealLogModalCloseText: { color: '#434843', fontSize: 27, lineHeight: 30, fontWeight: '300' },
+  mealLogSearchInput: { minHeight: 48, paddingHorizontal: 15, borderWidth: 1, borderColor: '#d6d8d4', borderRadius: 10, backgroundColor: '#fff', color: '#1b1c1c', fontSize: 15 },
+  mealLogRecipeList: { maxHeight: 225, marginTop: 10 },
+  mealLogRecipeOption: { minHeight: 68, marginBottom: 8, padding: 8, borderRadius: 10, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  mealLogRecipeOptionImage: { width: 52, height: 52, borderRadius: 8, backgroundColor: '#e4e2e1' },
+  mealLogRecipeOptionFallback: { width: 52, height: 52, borderRadius: 8, backgroundColor: '#d3e8d5', alignItems: 'center', justifyContent: 'center' },
+  mealLogRecipeOptionTitle: { flex: 1, color: '#1b1c1c', fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  mealLogRecipeOptionAdd: { width: 30, color: '#506354', fontSize: 24, lineHeight: 28, textAlign: 'center' },
+  mealLogNoRecipe: { paddingVertical: 22, color: '#737872', fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  mealLogDivider: { marginVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mealLogDividerLine: { flex: 1, height: 1, backgroundColor: '#e4e2e1' },
+  mealLogDividerText: { color: '#737872', fontSize: 10, lineHeight: 14, fontWeight: '700' },
+  mealLogManualInput: { minHeight: 46, marginBottom: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: '#d6d8d4', borderRadius: 10, backgroundColor: '#fff', color: '#1b1c1c', fontSize: 15 },
+  mealLogManualNote: { minHeight: 70, paddingTop: 12, paddingBottom: 12, textAlignVertical: 'top' },
+  mealLogSubmitButton: { minHeight: 50, marginTop: 2, borderRadius: 10, backgroundColor: '#334537', alignItems: 'center', justifyContent: 'center' },
+  mealLogSubmitLabel: { color: '#fff', fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  premiumScreen: { flex: 1, backgroundColor: '#faf9f6' },
+  premiumFlex: { flex: 1 },
+  premiumTopBar: { height: 64, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(196,199,199,0.18)', backgroundColor: 'rgba(250,249,246,0.98)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  premiumCloseButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  premiumCloseText: { marginTop: -3, color: '#181919', fontSize: 31, lineHeight: 34, fontWeight: '300' },
+  premiumTopTitle: { color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 24, lineHeight: 31, fontWeight: '700' },
+  premiumContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 204 },
+  premiumHero: { width: '100%', aspectRatio: 1.25, borderRadius: 14, overflow: 'hidden', justifyContent: 'flex-end', shadowColor: '#181919', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 14, elevation: 7 },
+  premiumHeroImage: { borderRadius: 14 },
+  premiumHeroOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(10,12,9,0.39)' },
+  premiumHeroCopy: { paddingHorizontal: 18, paddingBottom: 19 },
+  premiumHeroEyebrow: { marginBottom: 8, color: '#ffdea5', fontSize: 9, lineHeight: 13, fontWeight: '800', letterSpacing: 1.7 },
+  premiumHeroTitle: { color: '#fff', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 26, lineHeight: 34, fontWeight: '700' },
+  premiumActiveBanner: { marginTop: 16, padding: 14, borderRadius: 12, backgroundColor: '#2a2f1f', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  premiumActiveIcon: { width: 34, color: '#fed488', fontSize: 25, lineHeight: 30, textAlign: 'center' },
+  premiumActiveTitle: { color: '#fff', fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  premiumActiveText: { marginTop: 2, color: '#c4c9b1', fontSize: 11, lineHeight: 16 },
+  premiumSection: { marginTop: 32 },
+  premiumSectionTitle: { marginBottom: 12, color: '#181919', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }), fontSize: 22, lineHeight: 29, fontWeight: '700' },
+  premiumBenefits: { gap: 10 },
+  premiumBenefitCard: { minHeight: 78, paddingHorizontal: 14, paddingVertical: 13, borderWidth: 1, borderColor: 'rgba(196,199,199,0.25)', borderRadius: 12, backgroundColor: '#f4f3f1', flexDirection: 'row', alignItems: 'center', gap: 13 },
+  premiumBenefitIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(254,212,136,0.25)', alignItems: 'center', justifyContent: 'center' },
+  premiumBenefitIconText: { color: '#775a19', fontSize: 22, lineHeight: 27, fontWeight: '700' },
+  premiumBenefitTitle: { color: '#1a1c1a', fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  premiumBenefitText: { marginTop: 3, paddingRight: 2, color: '#616460', fontSize: 11, lineHeight: 16 },
+  premiumPlans: { gap: 12 },
+  premiumPlanCard: { position: 'relative', minHeight: 152, padding: 16, paddingTop: 22, borderWidth: 1, borderColor: '#c4c7c7', borderRadius: 14, backgroundColor: '#f4f3f1', overflow: 'hidden' },
+  premiumPlanCardSelected: { borderWidth: 2, borderColor: '#775a19', backgroundColor: '#fff', shadowColor: '#775a19', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.12, shadowRadius: 9, elevation: 4 },
+  premiumPlanCardMonthly: { minHeight: 127, paddingTop: 16 },
+  premiumPopularBadge: { position: 'absolute', top: 0, right: 0, paddingHorizontal: 13, paddingVertical: 5, borderBottomLeftRadius: 10, backgroundColor: '#775a19' },
+  premiumPopularBadgeText: { color: '#fff', fontSize: 9, lineHeight: 12, fontWeight: '800', letterSpacing: 0.7 },
+  premiumPlanRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 },
+  premiumPlanTitle: { color: '#1a1c1a', fontSize: 16, lineHeight: 22, fontWeight: '800' },
+  premiumPlanCaption: { marginTop: 4, color: '#676a68', fontSize: 12, lineHeight: 17 },
+  premiumPlanPriceWrap: { alignItems: 'flex-end' },
+  premiumPlanPriceGold: { color: '#775a19', fontSize: 24, lineHeight: 30, fontWeight: '900' },
+  premiumPlanPrice: { color: '#181919', fontSize: 24, lineHeight: 30, fontWeight: '900' },
+  premiumPlanUnit: { color: '#747878', fontSize: 10, lineHeight: 14 },
+  premiumPlanDivider: { height: 1, marginTop: 14, marginBottom: 11, backgroundColor: 'rgba(196,199,199,0.42)' },
+  premiumPlanFooter: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  premiumRadio: { width: 18, height: 18, borderWidth: 1.5, borderColor: '#8b8e8b', borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  premiumRadioSelected: { borderColor: '#775a19' },
+  premiumRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#775a19' },
+  premiumDiscount: { color: '#775a19', fontSize: 11, lineHeight: 15, fontWeight: '800' },
+  premiumMonthlyHint: { color: '#676a68', fontSize: 11, lineHeight: 15, fontWeight: '700' },
+  premiumLimitNote: { marginTop: 24, padding: 13, borderRadius: 10, backgroundColor: '#efeeeb', flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  premiumLimitNoteIcon: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#747878', color: '#fff', fontSize: 12, lineHeight: 20, fontWeight: '800', textAlign: 'center' },
+  premiumLimitNoteText: { flex: 1, color: '#5f625f', fontSize: 10, lineHeight: 16 },
+  premiumLegal: { marginTop: 24, paddingHorizontal: 8, color: '#747878', fontSize: 9, lineHeight: 15, textAlign: 'center' },
+  premiumCtaBar: { position: 'absolute', left: 0, right: 0, bottom: 80, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: 'rgba(196,199,199,0.22)', backgroundColor: 'rgba(250,249,246,0.98)', zIndex: 10 },
+  premiumCta: { minHeight: 54, borderRadius: 12, backgroundColor: '#181919', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, shadowColor: '#181919', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 9, elevation: 6 },
+  premiumCtaLabel: { color: '#fff', fontSize: 16, lineHeight: 22, fontWeight: '900' },
+  premiumCtaSparkle: { color: '#fed488', fontSize: 19, lineHeight: 23 },
 })

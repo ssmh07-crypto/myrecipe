@@ -9,7 +9,7 @@
 npm run eas:init
 ```
 
-3. Add EAS secrets:
+3. Add EAS build environment variables. These `EXPO_PUBLIC_*` values are embedded in the app and must never contain server secrets:
 
 ```bash
 npx eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_URL --value "..."
@@ -18,7 +18,7 @@ npx eas secret:create --scope project --name EXPO_PUBLIC_API_BASE_URL --value "h
 ```
 
 4. Create an Apple Developer account and Google Play Console account.
-5. Publish the privacy policy in `docs/privacy-policy.md` at a public HTTPS URL.
+5. Replace the privacy-policy contact placeholder with a monitored operator email address, then publish the policy at a public HTTPS URL.
 
 ## Android
 
@@ -84,9 +84,17 @@ recipe, cookbook, meal planner, cooking notes, recipe organizer
 
 - Replace the placeholder package/bundle IDs if you have a registered company or brand namespace.
 - Test signup, login, recipe creation, image upload, URL import, premium activation, folder assignment, and calendar entries on a real device.
-- Run `supabase/schema.sql` and confirm RLS policies are enabled for recipes, folders, and `meal_entries`.
+- Run `npm run supabase:migrations`, `npm run supabase:push:dry`, and `npm run supabase:push`; confirm all files under `supabase/migrations` are applied.
 - Confirm `OPENAI_API_KEY`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` remain server-only in Cloudflare Pages Functions.
+- Confirm `SUPADATA_API_KEY` and `R2_SIGNING_SECRET` remain server-only in Cloudflare Pages Functions.
+- Set `RECIPE_IMPORT_ALLOWED_HOSTS` in Cloudflare Pages. Use comma-separated exact hosts and explicit wildcards, for example `youtube.com,*.youtube.com,youtu.be,instagram.com,*.instagram.com`.
+- Configure an R2 lifecycle rule that deletes `cache/recipe-import/` objects after 30 days.
+- Confirm the `RECIPE_IMAGES` R2 bucket has public access disabled.
+- Enable Supabase email confirmation, leaked-password protection, secure password change, and exact production redirect URLs.
+- Before enabling CAPTCHA, integrate a Turnstile or hCaptcha token flow in the React Native login/signup UI and test it on both platforms. Enabling CAPTCHA without sending `captchaToken` will block authentication.
+- Remove `exp://**` from the production Supabase redirect allowlist.
+- Test Google login uses a `?code=` PKCE callback and never returns tokens in the URL fragment.
 - Confirm the privacy policy URL is available before review submission.
-- Replace `support@example.com` in the privacy policy with a monitored operator email address.
-- Apply the latest `supabase/schema.sql` so private images, account deletion cascades, and import quotas are active.
 - Verify in-app account deletion on both platforms, including image removal and return to the login screen.
+- Verify account deletion is rejected until the user has signed in again within the previous 10 minutes.
+- Enable GitHub branch protection, Dependabot alerts/security updates, secret scanning push protection, and CodeQL.

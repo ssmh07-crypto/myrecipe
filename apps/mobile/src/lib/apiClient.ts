@@ -2,7 +2,12 @@ import type { RecipeInput } from '../types/recipe'
 
 type ApiError = { error?: { message?: string } }
 
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://myrecipe-1im.pages.dev'
+const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://myrecipe-1im.pages.dev'
+const parsedApiBaseUrl = new URL(configuredApiBaseUrl)
+if (parsedApiBaseUrl.protocol !== 'https:') {
+  throw new Error('EXPO_PUBLIC_API_BASE_URL은 HTTPS 주소여야 합니다.')
+}
+export const apiBaseUrl = parsedApiBaseUrl.toString().replace(/\/$/, '')
 const requestTimeoutMs = 120_000
 
 const requestJson = async <T>(path: string, method: 'POST' | 'DELETE', body: unknown, accessToken?: string): Promise<T> => {

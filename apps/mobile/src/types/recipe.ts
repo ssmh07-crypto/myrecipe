@@ -35,6 +35,9 @@ export interface RecipeFolder {
   user_id: string
   name: string
   image_url?: string
+  image_path?: string
+  description?: string | null
+  sort_order?: number
   created_at: string
   updated_at: string
 }

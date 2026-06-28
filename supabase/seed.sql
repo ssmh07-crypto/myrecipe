@@ -1,0 +1,1 @@
+-- Keep production data out of local seeds. Add deterministic development fixtures here.

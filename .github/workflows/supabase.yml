@@ -1,0 +1,50 @@
+name: Security and Supabase
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  application-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix apps/mobile --ignore-scripts
+      - name: Type check
+        run: npm run typecheck
+      - name: Audit dependencies
+        run: |
+          npm audit --audit-level=high
+          npm audit --prefix apps/mobile --audit-level=high
+
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install Supabase CLI
+        run: npm ci --ignore-scripts
+      - name: Apply migrations to a fresh database
+        run: npx supabase db start
+      - name: Lint database functions
+        run: npx supabase db lint --local --level warning --fail-on error
