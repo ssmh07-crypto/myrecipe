@@ -24,6 +24,6 @@
     "supabase:types:linked": "supabase gen types typescript --linked --schema public > apps/mobile/src/types/database.generated.ts"
   },
   "devDependencies": {
-    "supabase": "2.107.0"
+    "supabase": "2.108.0"
   }
 }
