@@ -1,4 +1,5 @@
 import type { Recipe, RecipeInput } from '../types/recipe'
+import type { Database, Json } from '../types/database.generated'
 import { normalizeIngredientItems } from './ingredients'
 
 export const recipeSelectColumns = 'id,user_id,title,servings,difficulty,image_url,image_path,ingredients,seasonings,steps_text,step_images,step_image_paths,memo,source_url,source_type,is_favorite,created_at,updated_at'
@@ -56,7 +57,9 @@ const getStepImagePaths = (images: unknown, paths: unknown) => {
   )
 }
 
-export const normalizeRecipe = (recipe: LegacyRecipe): Recipe => ({
+export const normalizeRecipe = (value: unknown): Recipe => {
+  const recipe = value && typeof value === 'object' ? value as LegacyRecipe : {}
+  return {
   ...(recipe as Recipe),
   title: cleanText(recipe.title, 200),
   image_url: cleanUrl(recipe.image_url),
@@ -72,7 +75,8 @@ export const normalizeRecipe = (recipe: LegacyRecipe): Recipe => ({
   source_url: cleanUrl(recipe.source_url),
   source_type: recipe.source_type === 'imported' ? 'imported' : 'manual',
   is_favorite: Boolean(recipe.is_favorite),
-})
+  }
+}
 
 export const normalizeRecipeInput = (recipe: Partial<RecipeInput>): RecipeInput => ({
   title: cleanText(recipe.title, 200),
@@ -91,10 +95,23 @@ export const normalizeRecipeInput = (recipe: Partial<RecipeInput>): RecipeInput 
   is_favorite: Boolean(recipe.is_favorite),
 })
 
-export const toRecipeRow = (recipe: RecipeInput) => ({
-  ...recipe,
+const toJson = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json
+
+type RecipeWriteRow = Database['public']['Tables']['recipes']['Update'] & { title: string }
+
+export const toRecipeRow = (recipe: RecipeInput): RecipeWriteRow => ({
+  title: recipe.title,
+  servings: recipe.servings,
+  difficulty: recipe.difficulty,
+  ingredients: toJson(recipe.ingredients),
+  seasonings: toJson(recipe.seasonings),
+  steps_text: recipe.steps_text,
+  memo: recipe.memo,
+  source_url: recipe.source_url,
+  source_type: recipe.source_type,
+  is_favorite: recipe.is_favorite,
   image_url: recipe.image_path ? null : recipe.image_url || null,
   image_path: recipe.image_path || null,
-  step_images: recipe.step_images.map((url, index) => recipe.step_image_paths[index] ? '' : url),
-  step_image_paths: recipe.step_image_paths,
+  step_images: toJson(recipe.step_images.map((url, index) => recipe.step_image_paths[index] ? '' : url)),
+  step_image_paths: toJson(recipe.step_image_paths),
 })

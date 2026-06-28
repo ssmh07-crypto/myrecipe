@@ -2,6 +2,7 @@
 { pkgs, ... }: {
   channel = "stable-24.11";
   packages = [ pkgs.nodejs_22 ];
+  services.docker.enable = true;
   env = {};
   idx = {
     extensions = [ "google.gemini-cli-vscode-ide-companion" ];

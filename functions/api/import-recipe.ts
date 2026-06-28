@@ -3,6 +3,7 @@ interface Env {
   SUPADATA_API_KEY?: string
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
+  RECIPE_IMPORT_ALLOWED_HOSTS: string
   RECIPE_IMAGES?: {
     get(key: string): Promise<{ body: ReadableStream<Uint8Array> } | null>
     put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>
@@ -28,7 +29,12 @@ interface RecipeDraft {
 
 const responseHeaders = {
   'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
   'Content-Type': 'application/json; charset=utf-8',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Referrer-Policy': 'no-referrer',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
 }
 
@@ -132,7 +138,7 @@ const flattenInstructions = (value: unknown, depth = 0): string[] => {
   return ownText ? [ownText, ...nested] : nested
 }
 
-const getRecipeJsonLdText = (html: string) => {
+const getRecipeJsonLd = (html: string) => {
   const scripts = html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)
   let checked = 0
   for (const match of scripts) {
@@ -143,25 +149,30 @@ const getRecipeJsonLdText = (html: string) => {
     if (!raw || raw.length > 250_000) continue
     try {
       const recipe = findRecipeSchema(JSON.parse(raw))
-      if (!recipe) continue
-      const ingredients = (Array.isArray(recipe.recipeIngredient) ? recipe.recipeIngredient : [])
-        .map((item) => textFromValue(item, 500))
-        .filter(Boolean)
-        .slice(0, 100)
-      const instructions = flattenInstructions(recipe.recipeInstructions).slice(0, 100)
-      if (ingredients.length < 2 || instructions.length < 1) continue
-      return [
-        `제목: ${textFromValue(recipe.name, 200)}`,
-        `설명: ${textFromValue(recipe.description, 2_000)}`,
-        `분량: ${textFromValue(recipe.recipeYield, 200)}`,
-        `재료:\n${ingredients.map((item) => `- ${item}`).join('\n')}`,
-        `조리 과정:\n${instructions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`,
-      ].filter(Boolean).join('\n\n').slice(0, 12_000)
+      if (recipe) return recipe
     } catch {
       continue
     }
   }
-  return ''
+  return null
+}
+
+const getRecipeJsonLdText = (html: string) => {
+  const recipe = getRecipeJsonLd(html)
+  if (!recipe) return ''
+  const ingredients = (Array.isArray(recipe.recipeIngredient) ? recipe.recipeIngredient : [])
+    .map((item) => textFromValue(item, 500))
+    .filter(Boolean)
+    .slice(0, 100)
+  const instructions = flattenInstructions(recipe.recipeInstructions).slice(0, 100)
+  if (ingredients.length < 2 || instructions.length < 1) return ''
+  return [
+    `제목: ${textFromValue(recipe.name, 200)}`,
+    `설명: ${textFromValue(recipe.description, 2_000)}`,
+    `분량: ${textFromValue(recipe.recipeYield, 200)}`,
+    `재료:\n${ingredients.map((item) => `- ${item}`).join('\n')}`,
+    `조리 과정:\n${instructions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`,
+  ].filter(Boolean).join('\n\n').slice(0, 12_000)
 }
 
 const blockedHosts = [
@@ -173,6 +184,21 @@ const blockedHosts = [
 ]
 
 const normalizeHostname = (hostname: string) => hostname.replace(/^www\./i, '').replace(/\.$/, '').toLowerCase()
+
+const getAllowedHosts = (value: string | undefined) =>
+  (value || '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase().replace(/\.$/, ''))
+    .filter((host) => /^(\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(host))
+
+const isAllowedHost = (hostname: string, allowedHosts: string[]) => {
+  const normalized = normalizeHostname(hostname)
+  return allowedHosts.some((allowedHost) => {
+    if (!allowedHost.startsWith('*.')) return normalized === allowedHost
+    const suffix = allowedHost.slice(2)
+    return normalized.endsWith(`.${suffix}`) && normalized !== suffix
+  })
+}
 
 const isYouTubeHost = (hostname: string) => {
   const normalized = normalizeHostname(hostname)
@@ -226,7 +252,7 @@ const isPrivateHost = (hostname: string) => {
   )
 }
 
-const validateRecipeUrl = (value: string) => {
+const validateRecipeUrl = (value: string, allowedHosts: string[]) => {
   if (!value || value.length > 2_000) throw new PublicError('유효한 URL을 입력해 주세요.')
   let url: URL
   try {
@@ -241,6 +267,7 @@ const validateRecipeUrl = (value: string) => {
   if (isBlockedHost(url.hostname)) {
     throw new PublicError('영상/SNS 링크 자동 추출은 지원하지 않습니다. 권한이 있는 웹 레시피 페이지 URL만 사용할 수 있습니다.')
   }
+  if (!isAllowedHost(url.hostname, allowedHosts)) throw new PublicError('허용된 레시피 사이트 URL만 사용할 수 있습니다.')
   if (isPrivateHost(url.hostname)) throw new PublicError('이 URL은 사용할 수 없습니다.')
   url.username = ''
   url.password = ''
@@ -376,7 +403,7 @@ const cacheImport = async (env: Env, cacheKey: string, recipe: RecipeDraft) => {
   )
 }
 
-const fetchExternalPage = async (initialUrl: URL) => {
+const fetchExternalPage = async (initialUrl: URL, allowedHosts: string[]) => {
   let url = initialUrl
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
     await assertPublicDns(url.hostname)
@@ -388,7 +415,7 @@ const fetchExternalPage = async (initialUrl: URL) => {
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('Location')
       if (!location) return response
-      url = validateRecipeUrl(new URL(location, url).toString())
+      url = validateRecipeUrl(new URL(location, url).toString(), allowedHosts)
       continue
     }
     return response
@@ -750,22 +777,26 @@ const readRequestBody = async (request: Request) => {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
+  const allowedHosts = getAllowedHosts(env.RECIPE_IMPORT_ALLOWED_HOSTS)
   if (request.method === 'GET') return json({
     status: 'ok',
     version: pipelineVersion,
-    transcript_configured: Boolean(env.SUPADATA_API_KEY),
-    shared_cache_configured: Boolean(env.RECIPE_IMAGES),
   })
   if (request.method === 'HEAD') return new Response(null, { status: 204, headers: responseHeaders })
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, HEAD, POST, OPTIONS' } })
   if (request.method !== 'POST') return new Response(JSON.stringify({ error: { message: 'POST 요청만 지원합니다.' } }), { status: 405, headers: { ...responseHeaders, Allow: 'GET, HEAD, POST, OPTIONS' } })
-  if (!env.OPENAI_API_KEY || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return error('서버 설정이 완료되지 않았습니다.', 500)
+  if (!env.OPENAI_API_KEY || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !allowedHosts.length) {
+    return error('서버 설정이 완료되지 않았습니다.', 500)
+  }
 
   try {
     const body = await readRequestBody(request)
-    const url = validateRecipeUrl(typeof body.url === 'string' ? body.url : '')
+    const url = validateRecipeUrl(typeof body.url === 'string' ? body.url : '', allowedHosts)
     const userId = await getAuthenticatedUserId(env, getBearerToken(request))
     await assertPremiumAccess(env, userId)
+    // Reserve quota before any paid extraction or AI request. Failed source pages still
+    // consume one attempt, which prevents repeated invalid requests from creating cost.
+    await consumeImportQuota(env, userId)
 
     const cacheKey = await getImportCacheKey(url)
     const cachedRecipe = await getCachedImport(env, cacheKey).catch((cacheError) => {
@@ -773,7 +804,6 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       return null
     })
     if (cachedRecipe) {
-      await consumeImportQuota(env, userId)
       return json({
         ...cachedRecipe,
         image_url: getSourceImageUrl(url),
@@ -788,9 +818,9 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
     const [videoResult, response] = isSocialUrl
       ? await Promise.all([
           getSocialVideoRecipe(env.SUPADATA_API_KEY, url),
-          fetchExternalPage(url),
+          fetchExternalPage(url, allowedHosts),
         ])
-      : [{ draft: null, error: '' }, await fetchExternalPage(url)] as const
+      : [{ draft: null, error: '' }, await fetchExternalPage(url, allowedHosts)] as const
     const videoDraft = videoResult.draft
     let videoRecipe: RecipeDraft | null = null
     if (videoDraft) {
@@ -801,7 +831,6 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       }
     }
     if (videoRecipe) {
-      await consumeImportQuota(env, userId)
       await cacheImport(env, cacheKey, videoRecipe).catch((cacheError) => {
         console.error('Recipe import cache write failed', cacheError)
       })
@@ -848,7 +877,6 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
       if (!isSocialUrl || !(validationError instanceof PublicError) || validationError.status !== 422) throw validationError
       throw new PublicError(`Supadata 추출 결과로 레시피를 생성할 수 없습니다. 자막: ${transcriptResult.error || '재료/조리 과정 없음'} / 영상: ${videoResult.error || '재료/조리 과정 없음'}`, 422)
     }
-    await consumeImportQuota(env, userId)
     await cacheImport(env, cacheKey, recipe).catch((cacheError) => {
       console.error('Recipe import cache write failed', cacheError)
     })

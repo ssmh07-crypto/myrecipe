@@ -9,7 +9,12 @@ interface Env {
 
 const headers = {
   'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
   'Content-Type': 'application/json; charset=utf-8',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Referrer-Policy': 'no-referrer',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
 }
 
@@ -30,14 +35,20 @@ const getBearerToken = (request: Request) => {
   return match?.[1] || ''
 }
 
-const getUserId = async (env: Env, token: string) => {
+const getAuthenticatedUser = async (env: Env, token: string) => {
   if (!token) return null
   const response = await fetchWithTimeout(`${env.SUPABASE_URL}/auth/v1/user`, {
     headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${token}` },
   })
   if (!response.ok) return null
-  const user = await response.json() as { id?: string }
-  return user.id || null
+  const user = await response.json() as { id?: string; last_sign_in_at?: string }
+  return user.id ? { id: user.id, lastSignInAt: user.last_sign_in_at || '' } : null
+}
+
+const hasRecentSignIn = (lastSignInAt: string) => {
+  const signedInAt = new Date(lastSignInAt).getTime()
+  const age = Date.now() - signedInAt
+  return Number.isFinite(signedInAt) && age >= -60_000 && age <= 10 * 60_000
 }
 
 const getImagePaths = async (env: Env, userId: string) => {
@@ -83,8 +94,12 @@ export const onRequest = async ({ request, env }: { request: Request; env: Env }
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !env.RECIPE_IMAGES) return json({ error: { message: '서버 설정이 완료되지 않았습니다.' } }, 500)
 
   try {
-    const userId = await getUserId(env, getBearerToken(request))
-    if (!userId) return json({ error: { message: '로그인이 필요합니다.' } }, 401)
+    const user = await getAuthenticatedUser(env, getBearerToken(request))
+    if (!user) return json({ error: { message: '로그인이 필요합니다.' } }, 401)
+    if (!hasRecentSignIn(user.lastSignInAt)) {
+      return json({ error: { message: '계정을 삭제하려면 로그아웃한 뒤 다시 로그인해주세요.' } }, 403)
+    }
+    const userId = user.id
 
     await Promise.all([deleteImages(env, await getImagePaths(env, userId)), deleteR2Images(env, userId)])
     const response = await fetchWithTimeout(`${env.SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {

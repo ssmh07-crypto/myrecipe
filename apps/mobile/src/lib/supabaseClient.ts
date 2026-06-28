@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createClient } from '@supabase/supabase-js'
 import * as SecureStore from 'expo-secure-store'
 
+import type { Database } from '../types/database.generated'
+
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
 
@@ -52,7 +54,7 @@ const secureSessionStorage = {
   },
 }
 
-export const supabase = createClient(
+export const supabase = createClient<Database>(
   supabaseUrl || 'https://example.supabase.co',
   supabaseAnonKey || 'missing-anon-key',
   {
@@ -61,6 +63,7 @@ export const supabase = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+      flowType: 'pkce',
     },
   },
 )
